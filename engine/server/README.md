@@ -71,8 +71,9 @@ private keys, and `node.db` (and any backup of it) contains the signing key.
   64-connection cap.
 * Orders and inventory follow the rules in `engine/domain` (state machine, stock ledger,
   recipes; the server reconciles stock every 30 s). Payments are still a placeholder.
-* The business defaults (deduct stock at `accepted`, allow overselling, no editing a placed
-  order, cancel outranks in-progress, completed outranks cancel) need the owner's sign-off.
+* Business defaults approved by the owner on 2026-11-02: deduct stock at `accepted`, allow
+  overselling (flagged), no editing a placed order, cancel outranks in-progress statuses,
+  completed outranks cancel.
 * Tested on Windows only; the Linux build has not been run.
 
 ## Checking it works
