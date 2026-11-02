@@ -501,7 +501,7 @@ function openMenuPop(card) {
     var img = card.getAttribute('data-img');
     var title = card.getAttribute('data-title');
     var cat = card.getAttribute('data-cat');
-    var price = parseFloat(card.getAttribute('data-price'));
+    var price = parseFloat(String(card.getAttribute('data-price')).replace('$', ''));
     var old = card.getAttribute('data-old');
     var rating = parseFloat(card.getAttribute('data-rating'));
     var reviews = card.getAttribute('data-reviews');
@@ -511,6 +511,7 @@ function openMenuPop(card) {
     var tags = card.getAttribute('data-tags') || '';
 
     document.getElementById('mpImg').setAttribute('src', img);
+    document.querySelector('.mpimg').classList.remove('zoomed');
     document.getElementById('mpCat').textContent = cat;
     document.getElementById('mpTitle').textContent = title;
 
@@ -558,24 +559,7 @@ document.querySelectorAll('.madd').forEach(function(btn) {
     });
 });
 
-document.querySelectorAll('.mhrt').forEach(function(btn) {
-    btn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        var ico = this.querySelector('i');
-        ico.classList.toggle('far');
-        ico.classList.toggle('fas');
-        this.style.color = ico.classList.contains('fas') ? 'var(--primary)' : '#ccc';
-        if (ico.classList.contains('fas')) {
-            this.classList.add('heart-wish');
-            showToast('Added to wishlist!', 'success');
-        } else {
-            showToast('Removed from wishlist', 'warn');
-        }
-        setTimeout(function() {
-            btn.classList.remove('heart-wish');
-        }, 500);
-    });
-});
+/* wishlist hearts are handled in shop.js */
 
 document.getElementById('mpClose').addEventListener('click', closeMenuPop);
 menuPop.addEventListener('click', function(e) {
@@ -791,7 +775,7 @@ function addToRecent(card) {
     var item = {
         img: card.getAttribute('data-img') || 'img/menu/1.jpg',
         title: card.getAttribute('data-title') || 'Item',
-        price: parseFloat(card.getAttribute('data-price')) || 0,
+        price: parseFloat(String(card.getAttribute('data-price')).replace('$', '')) || 0,
         old: card.getAttribute('data-old') || ''
     };
     var recent = getRecent();
@@ -1391,18 +1375,152 @@ function addChatMsg(text, type) {
     lcMessages.appendChild(div);
     lcMessages.scrollTop = lcMessages.scrollHeight;
 }
-function botReply(text) {
-    setTimeout(function() {
-        addChatMsg('<strong>Support:</strong> ' + text, 'bot');
-    }, 1200 + Math.random() * 1500);
+/* ---- Chatbot knowledge base ---- */
+var LC_QUICK = ['Menu & prices', 'Delivery', 'Opening hours', 'Payment methods', 'Promo codes', 'Book a table', 'Contact us'];
+
+function lcMenuItems() {
+    return Array.prototype.map.call(document.querySelectorAll('.mcard'), function(c) {
+        return {
+            title: c.getAttribute('data-title'),
+            cat: c.getAttribute('data-cat'),
+            price: c.getAttribute('data-price'),
+            cal: c.getAttribute('data-cal'),
+            time: c.getAttribute('data-time'),
+            tags: (c.getAttribute('data-tags') || '').toLowerCase()
+        };
+    });
 }
+
+function lcOpenNow() {
+    var hours = { 0: [11, 21], 3: [9, 22], 4: [9, 22], 5: [9, 23], 6: [10, 23.5] };
+    var d = new Date(), h = hours[d.getDay()], t = d.getHours() + d.getMinutes() / 60;
+    if (!h) return 'We are <strong>closed today</strong> (closed Monday &amp; Tuesday).';
+    return (t >= h[0] && t < h[1]) ? 'We are <strong>open right now</strong>.' : 'We are <strong>closed right now</strong>.';
+}
+
+var LC_INTENTS = [
+    { keys: ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening'], exact: true,
+      reply: function() { return 'Hello! 👋 Welcome to Richy\'s Eat. I can help with our menu, delivery, payments, promo codes, opening hours and reservations. What would you like to know?'; } },
+    { keys: ['thank', 'thanks', 'cheers'],
+      reply: function() { return 'You\'re welcome! Enjoy your meal. 🍔 Anything else I can help with?'; } },
+    { keys: ['bye', 'goodbye', 'see you'],
+      reply: function() { return 'Goodbye! Hope to serve you soon. 👋'; } },
+    { keys: ['vegetarian', 'vegan', 'veggie', 'meatless'],
+      reply: function() {
+          var v = lcMenuItems().filter(function(i) { return i.tags.indexOf('vegetarian') > -1; });
+          return 'Vegetarian options: ' + v.map(function(i) { return '<strong>' + i.title + '</strong> (' + i.price + ')'; }).join(', ') + '. For vegan requests or allergies, please call us on 0531629095 so the kitchen can advise.';
+      } },
+    { keys: ['spicy', 'hot', 'heat'],
+      reply: function() { return 'Our spiciest pick is the <strong>Nashville Hot Chicken</strong> ($12.99). When you open any item you can also choose Mild, Medium, Hot or Extra Hot.'; } },
+    { keys: ['allerg', 'gluten', 'peanut', 'nuts', 'dairy', 'halal'],
+      reply: function() { return 'For allergies or dietary needs (gluten, nuts, dairy, halal), please call us on <a href="tel:0531629095">0531629095</a> or add a note at checkout so the kitchen can help safely.'; } },
+    { keys: ['calorie', 'kcal', 'nutrition', 'protein', 'carb'],
+      reply: function() {
+          return 'Calories per item: ' + lcMenuItems().map(function(i) { return i.title + ' ' + i.cal + ' kcal'; }).join(', ') + '. Open an item to see full nutrition info.';
+      } },
+    { keys: ['recommend', 'popular', 'best', 'favourite', 'favorite', 'suggest', 'bestseller'],
+      reply: function() { return 'Customer favourites: <strong>Nashville Hot Chicken</strong> (5.0★), <strong>Classic Smash Burger</strong> (4.9★) and <strong>Nutella Lava Cake</strong> (4.9★). See the "Popular Right Now" section to add them quickly.'; } },
+    { keys: ['combo', 'deal', 'bundle', 'offer', 'discount'],
+      reply: function() { return 'Combo deals: <strong>Burger Lover Combo</strong> $18.74, <strong>Pizza Party Bundle</strong> $24.49, <strong>Family Chicken Feast</strong> $35.99. Scroll to "Combo Deals" to add one.'; } },
+    { keys: ['promo', 'coupon', 'voucher', 'code'],
+      reply: function() { return 'Promo codes you can use in the cart: <strong>SAVE10</strong> (10% off), <strong>BURGER20</strong> (20% off), <strong>WELCOME</strong> ($5 off) and <strong>YUSSIF15</strong> ($15 off orders of $75+). Only one code per order.'; } },
+    { keys: ['free delivery', 'delivery fee', 'delivery cost', 'shipping'],
+      reply: function() { return 'Delivery is <strong>free on orders over $30</strong>; otherwise a $4.99 fee applies.'; } },
+    { keys: ['deliver', 'how long', 'how fast', 'arrive', 'eta', 'wait'],
+      reply: function() { return 'Delivery usually takes <strong>25-35 minutes</strong>. Free delivery on orders over $30, otherwise $4.99. You can also choose a scheduled time at checkout.'; } },
+    { keys: ['pay', 'card', 'cash', 'momo', 'mobile money', 'mtn', 'airtel', 'bank', 'transfer'],
+      reply: function() { return 'We accept <strong>Mobile Money</strong> (MTN MoMo, Airtel Money, Orange Money), <strong>Bank Transfer</strong>, <strong>Card</strong> and <strong>Cash on Delivery</strong>. Choose one at checkout.'; } },
+    { keys: ['track', 'where is my order', 'order status', 'my order'],
+      reply: function() { return 'After checkout a tracking window shows your order number and status. Past orders are saved under the Orders button in the menu bar.'; } },
+    { keys: ['cancel', 'refund', 'wrong order', 'missing', 'complain', 'problem', 'issue'],
+      reply: function() { return 'Sorry about that! For cancellations, refunds or order problems please call <a href="tel:0531629095">0531629095</a> or email <a href="mailto:rashlast395@gmail.com">rashlast395@gmail.com</a> with your order number and we will sort it out quickly.'; } },
+    { keys: ['hour', 'open', 'close', 'closing', 'time do you', 'what time'],
+      reply: function() { return lcOpenNow() + '<br>Mon-Tue: Closed<br>Wed-Thu: 9 AM-10 PM<br>Fri: 9 AM-11 PM<br>Sat: 10 AM-11:30 PM<br>Sun: 11 AM-9 PM'; } },
+    { keys: ['reserv', 'book', 'table', 'booking'],
+      reply: function() { return 'You can book a table in the <a href="#reservation">Reservation</a> section: pick the date, time and number of guests and we will confirm by email.'; } },
+    { keys: ['address', 'location', 'where are you', 'find you', 'directions'],
+      reply: function() { return 'We are at <strong>42 Flavor Street, NY</strong>.'; } },
+    { keys: ['contact', 'phone', 'call', 'number', 'email', 'whatsapp', 'human', 'agent', 'speak', 'talk'],
+      reply: function() { return 'Reach us on <a href="tel:0531629095">0531629095</a>, WhatsApp (green button), or <a href="mailto:rashlast395@gmail.com">rashlast395@gmail.com</a>.'; } },
+    { keys: ['cart', 'checkout', 'how to order', 'how do i order', 'place order', 'buy'],
+      reply: function() { return 'Tap <strong>+</strong> on any item, choose size, spice and extras, then <strong>Add to Cart</strong>. Open the cart (top bar), apply a promo code if you have one and press Checkout.'; } },
+    { keys: ['menu', 'food', 'price', 'cost', 'how much', 'burger', 'pizza', 'chicken', 'wrap', 'pasta', 'dessert', 'cake'],
+      reply: function(txt) {
+          var items = lcMenuItems();
+          var hit = items.filter(function(i) {
+              return txt.indexOf(i.cat.toLowerCase()) > -1 || txt.indexOf(i.title.toLowerCase()) > -1 || (i.cat.toLowerCase() === 'desserts' && txt.indexOf('cake') > -1);
+          });
+          var list = hit.length ? hit : items;
+          return (hit.length ? 'Here\'s what we have: ' : 'Our menu: ') + list.map(function(i) {
+              return '<strong>' + i.title + '</strong> ' + i.price + ' (' + i.time + ' min)';
+          }).join('<br>') + '<br>Tap an item in the <a href="#menu">menu</a> for details.';
+      } }
+];
+
+function lcMatch(txt) {
+    var t = txt.toLowerCase().replace(/[^a-z0-9$ ]/g, ' ').replace(/\s+/g, ' ').trim();
+    var words = t.split(' ');
+    for (var i = 0; i < LC_INTENTS.length; i++) {
+        var it = LC_INTENTS[i];
+        for (var k = 0; k < it.keys.length; k++) {
+            var key = it.keys[k];
+            var found = it.exact ? words.indexOf(key) > -1 && words.length <= 4 : (t.indexOf(key) > -1);
+            if (found) return it.reply(t);
+        }
+    }
+    return null;
+}
+
+function lcQuickReplies() {
+    var old = lcMessages.querySelector('.lcchips');
+    if (old) old.remove();
+    var wrap = document.createElement('div');
+    wrap.className = 'lcchips';
+    LC_QUICK.forEach(function(q) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'lcchip';
+        b.textContent = q;
+        b.addEventListener('click', function() { lcAsk(q); });
+        wrap.appendChild(b);
+    });
+    lcMessages.appendChild(wrap);
+    lcMessages.scrollTop = lcMessages.scrollHeight;
+}
+
+function botReply(text) {
+    var typing = document.createElement('div');
+    typing.className = 'lcmsg bot lctyping';
+    typing.innerHTML = '<span></span><span></span><span></span>';
+    lcMessages.appendChild(typing);
+    lcMessages.scrollTop = lcMessages.scrollHeight;
+    setTimeout(function() {
+        typing.remove();
+        addChatMsg('<strong>Support:</strong> ' + text, 'bot');
+        lcQuickReplies();
+    }, 600 + Math.random() * 500);
+}
+
+function lcAsk(txt) {
+    txt = (txt || '').trim();
+    if (!txt) return;
+    var chips = lcMessages.querySelector('.lcchips');
+    if (chips) chips.remove();
+    var safe = txt.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    addChatMsg(safe, 'user');
+    var ans = lcMatch(txt);
+    botReply(ans || 'I\'m not sure I understood that. I can help with the <strong>menu, prices, delivery, payments, promo codes, opening hours and reservations</strong> - or call us on <a href="tel:0531629095">0531629095</a>.');
+}
+
 if (lcToggle) {
     lcToggle.addEventListener('click', function() {
         if (lcBox.style.display === 'none') {
             lcBox.style.display = 'block';
             if (lcMessages.children.length === 0) {
-                addChatMsg('<strong>Support:</strong> Hi! How can I help you today?', 'bot');
+                addChatMsg('<strong>Support:</strong> Hi! 👋 Welcome to Richy\'s Eat. How can I help you today?', 'bot');
+                lcQuickReplies();
             }
+            lcInput.focus();
         } else {
             lcBox.style.display = 'none';
         }
@@ -1415,14 +1533,9 @@ if (lcClose) {
 }
 if (lcSend) {
     lcSend.addEventListener('click', function() {
-        var txt = lcInput.value.trim();
-        if (!txt) return;
-        addChatMsg(txt, 'user');
+        var txt = lcInput.value;
         lcInput.value = '';
-        if (txt.toLowerCase().includes('order')) botReply('You can track your order in the tracking modal after checkout.');
-        else if (txt.toLowerCase().includes('delivery')) botReply('Delivery takes 25-35 minutes. Free delivery on orders over $30!');
-        else if (txt.toLowerCase().includes('menu') || txt.toLowerCase().includes('food')) botReply('We have burgers, pizza, chicken, wraps, pasta and desserts. Check our menu!');
-        else botReply('Thanks for reaching out! Our team will assist you shortly. You can also call us at +1 (800) 123-4567.');
+        lcAsk(txt);
     });
 }
 if (lcInput) {
@@ -1509,7 +1622,16 @@ document.getElementById('tmTrackBtn') && document.getElementById('tmTrackBtn').a
 /* ============================================================
    ADDRESS BOOK
    ============================================================ */
-var addrBook = JSON.parse(localStorage.getItem('yussif_addr') || '[]');
+function addrKey() {
+    return (window.RZ && window.RZ.addrKey) ? window.RZ.addrKey() : 'yussif_addr';
+}
+function loadAddrBook() {
+    try { return JSON.parse(localStorage.getItem(addrKey()) || '[]'); } catch (e) { return []; }
+}
+function saveAddrBook() {
+    localStorage.setItem(addrKey(), JSON.stringify(addrBook));
+}
+var addrBook = loadAddrBook();
 var selAddr = null;
 function renderAddr() {
     var list = document.getElementById('ckAddList');
@@ -1518,7 +1640,8 @@ function renderAddr() {
     addrBook.forEach(function(a, idx) {
         var item = document.createElement('div');
         item.className = 'ckadditem' + (selAddr === idx ? ' sel' : '');
-        item.innerHTML = '<div><div class="ckaddlabel">' + a.addr + '</div><div class="ckaddsub">' + a.city + ', ' + a.zip + '</div></div>' +
+        var esc = function(s) { return String(s).replace(/[&<>"']/g, function(c) { return '&#' + c.charCodeAt(0) + ';'; }); };
+        item.innerHTML = '<div><div class="ckaddlabel">' + esc(a.addr) + '</div><div class="ckaddsub">' + esc(a.city) + ', ' + esc(a.zip) + '</div></div>' +
             '<button class="ckadddel" data-i="' + idx + '"><i class="fas fa-trash-alt"></i></button>';
         item.addEventListener('click', function(e) {
             if (e.target.closest('.ckadddel')) return;
@@ -1530,17 +1653,18 @@ function renderAddr() {
         });
         list.appendChild(item);
     });
-    var delBtn = list.querySelector('.ckadddel');
-    if (delBtn) {
+    list.querySelectorAll('.ckadddel').forEach(function(delBtn) {
         delBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
             var i = parseInt(this.getAttribute('data-i'));
             addrBook.splice(i, 1);
-            localStorage.setItem('yussif_addr', JSON.stringify(addrBook));
+            saveAddrBook();
             if (selAddr === i) selAddr = null;
+            else if (selAddr !== null && selAddr > i) selAddr--;
             renderAddr();
             showToast('Address removed', 'warn');
         });
-    }
+    });
 }
 var addNewBtn = document.getElementById('addNew');
 var addForm = document.getElementById('ckAddForm');
@@ -1563,7 +1687,7 @@ if (addSave && addForm) {
         var zip = document.getElementById('addZip').value.trim();
         if (!addr || !city || !zip) { showToast('Please fill all address fields', 'warn'); return; }
         addrBook.push({ addr: addr, city: city, zip: zip });
-        localStorage.setItem('yussif_addr', JSON.stringify(addrBook));
+        saveAddrBook();
         document.getElementById('addAddr').value = '';
         document.getElementById('addCity').value = '';
         document.getElementById('addZip').value = '';
@@ -1944,35 +2068,7 @@ document.querySelectorAll('.mimg').forEach(function(imgWrap) {
 /* ============================================================
    WISHLIST PERSISTENCE
    ============================================================ */
-var wishlist = JSON.parse(localStorage.getItem('yussif_wishlist') || '[]');
-document.querySelectorAll('.mhrt').forEach(function(btn) {
-    var title = btn.closest('.mcard').getAttribute('data-title');
-    if (wishlist.includes(title)) {
-        var ico = btn.querySelector('i');
-        ico.classList.remove('far');
-        ico.classList.add('fas');
-        btn.style.color = 'var(--primary)';
-    }
-    btn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        var ico = btn.querySelector('i');
-        var isWish = ico.classList.contains('fas');
-        if (isWish) {
-            ico.classList.remove('fas');
-            ico.classList.add('far');
-            btn.style.color = '#ccc';
-            wishlist = wishlist.filter(function(w) { return w !== title; });
-            showToast('Removed from wishlist', 'warn');
-        } else {
-            ico.classList.remove('far');
-            ico.classList.add('fas');
-            btn.style.color = 'var(--primary)';
-            wishlist.push(title);
-            showToast('Added to wishlist!', 'success');
-        }
-        localStorage.setItem('yussif_wishlist', JSON.stringify(wishlist));
-    });
-});
+/* (moved to shop.js: per-account wishlist) */
 
 /* ============================================================
    SMART CART SUGGESTIONS
@@ -2153,7 +2249,6 @@ window.addEventListener('scroll', function() {
 /* ============================================================
    INITIALIZE
    ============================================================ */
-updateMobileNavCart();
 updateOrdersBtn();
 showCartSuggestions();
 

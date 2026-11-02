@@ -1,0 +1,196 @@
+/* ============================================================
+   SHOP LAYER STYLES (accounts, wishlist, menu tools, checkout)
+   ============================================================ */
+.mwrap.rz-hide { display: none !important; }
+
+/* AOS slide-in elements and decorative shapes must not widen the page on phones */
+html { overflow-x: hidden; }
+body { overflow-x: clip; max-width: 100%; }
+
+/* ---- nav buttons ---- */
+.rzbtn {
+  position: relative; background: none; border: none; cursor: pointer; color: #555;
+  font-size: 1rem; padding: 8px 10px; border-radius: 8px; transition: 0.3s;
+  display: inline-flex; align-items: center; gap: 6px; font-family: "Poppins", sans-serif;
+}
+.rzbtn:hover, .rzbtn.on { background: rgba(232, 40, 26, 0.08); color: var(--primary); }
+.rzlbl { font-size: 0.82rem; font-weight: 600; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rzcnt {
+  position: absolute; top: 0; right: 0; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--primary); color: #fff; font-size: 0.64rem; font-weight: 700; display: none;
+  align-items: center; justify-content: center;
+}
+
+/* ---- modals ---- */
+.rzov {
+  display: none; position: fixed; inset: 0; z-index: 100002; background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px); align-items: center; justify-content: center; padding: 16px;
+}
+.rzov.open { display: flex; animation: fadeov 0.25s ease; }
+.rzbox {
+  position: relative; background: #fff; border-radius: 20px; width: 100%; max-width: 460px; max-height: 92vh;
+  overflow-y: auto; box-shadow: var(--shadow-lg); font-family: "Poppins", sans-serif; color: var(--dark);
+}
+.rzbox.rzacct, .rzbox.rzlegalbox { max-width: 620px; }
+.rzx {
+  position: absolute; top: 12px; right: 12px; z-index: 2; width: 34px; height: 34px; border-radius: 50%;
+  border: none; background: #f2f2f2; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.rzx:hover { background: var(--primary); color: #fff; }
+.rzhead { text-align: center; padding: 30px 24px 8px; }
+.rzhead h3 { font-family: "Playfair Display", serif; font-weight: 700; font-size: 1.5rem; margin: 8px 0 4px; }
+.rzhead p { color: #888; font-size: 0.85rem; margin: 0; }
+.rzhead.small { display: flex; align-items: center; gap: 14px; text-align: left; padding: 22px 56px 8px 24px; }
+.rzhead.small h3 { font-size: 1.2rem; margin: 0; }
+.rzlogo, .rzavatar {
+  width: 52px; height: 52px; border-radius: 50%; margin: 0 auto; flex: none;
+  background: linear-gradient(135deg, var(--primary), var(--secondary)); color: #fff; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; font-size: 1.3rem;
+}
+.rzavatar { margin: 0; }
+
+.rztabs { display: flex; gap: 4px; padding: 12px 20px 0; border-bottom: 1px solid #eee; }
+.rztabs.scroll { overflow-x: auto; scrollbar-width: none; }
+.rztabs.scroll::-webkit-scrollbar { display: none; }
+.rztab {
+  flex: 1; white-space: nowrap; background: none; border: none; border-bottom: 3px solid transparent;
+  padding: 10px 12px; font-weight: 600; font-size: 0.82rem; color: #888; cursor: pointer; font-family: inherit;
+}
+.rztab:hover { color: var(--primary); }
+.rztab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.rzpane { padding: 18px 22px 24px; }
+
+/* ---- forms ---- */
+.rzform { display: flex; flex-direction: column; gap: 12px; padding: 18px 22px 22px; }
+.rzpane .rzform { padding: 0 0 6px; }
+.rzform label { display: flex; flex-direction: column; gap: 5px; font-size: 0.78rem; font-weight: 600; color: #555; }
+.rzform input[type=text], .rzform input[type=email], .rzform input[type=tel], .rzform input[type=password], .rzform input:not([type]),
+.rzform input[type=search], .rzbox input[type=text] {
+  border: 2px solid #eee; border-radius: 10px; padding: 10px 13px; font-size: 0.88rem; font-family: inherit;
+  outline: none; transition: 0.2s; width: 100%; background: #fff; font-weight: 400; color: var(--dark);
+}
+.rzform input:focus, .stsearch input:focus { border-color: var(--primary); }
+.rzpw { position: relative; display: block; }
+.rzeye { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); border: none; background: none; color: #999; cursor: pointer; padding: 6px; }
+.rzrow { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 0.8rem; }
+.rzrow a, .rzchk a, .rzback { color: var(--primary); font-weight: 600; text-decoration: none; }
+.rzchk { flex-direction: row !important; align-items: center; gap: 8px !important; font-weight: 500 !important; cursor: pointer; }
+.rzchk input { accent-color: var(--primary); width: 16px; height: 16px; }
+.rzerr { color: #dc2626; font-size: 0.8rem; min-height: 1em; font-weight: 500; }
+.rzhint { color: #777; font-size: 0.8rem; margin: 6px 0 0; }
+.rzmeter { height: 5px; background: #eee; border-radius: 3px; overflow: hidden; margin-top: -6px; }
+.rzmeter span { display: block; height: 100%; width: 0; transition: 0.25s; }
+.rzprimary {
+  background: linear-gradient(135deg, var(--primary), #c01e12); color: #fff; border: none; border-radius: 10px;
+  padding: 12px 18px; font-weight: 700; font-size: 0.9rem; cursor: pointer; font-family: inherit; transition: 0.2s;
+  text-align: center; text-decoration: none; display: inline-block;
+}
+.rzprimary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.rzprimary:disabled { opacity: 0.6; cursor: wait; transform: none; }
+.rzprimary.red { background: #b91c1c; }
+.rzghost { background: none; border: 2px solid #eee; border-radius: 10px; padding: 9px 16px; font-weight: 600; font-size: 0.82rem; color: #555; cursor: pointer; font-family: inherit; }
+.rzghost:hover { border-color: var(--primary); color: var(--primary); }
+.rzback { text-align: center; font-size: 0.82rem; }
+.rzgrid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rzbad { border-color: #dc2626 !important; box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12); }
+.danger-zone { margin-top: 18px; padding-top: 16px; border-top: 1px dashed #ddd; }
+.rzform h5 { font-size: 0.95rem; font-weight: 700; margin: 4px 0 0; }
+
+/* ---- lists inside the account ---- */
+.rzempty { text-align: center; padding: 34px 10px; color: #999; display: block; }
+.rzempty i { font-size: 2.4rem; color: #ddd; display: block; margin-bottom: 10px; }
+.rzempty p { margin: 0 0 6px; font-weight: 600; color: #666; }
+.rzempty span { font-size: 0.82rem; display: block; margin-bottom: 10px; }
+.rzorder { border: 1px solid #eee; border-radius: 14px; padding: 14px; margin-bottom: 12px; background: #fffdfb; }
+.rzohead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.rzodate { font-size: 0.74rem; color: #999; margin: 2px 0 8px; }
+.rzoitems { font-size: 0.84rem; color: #555; line-height: 1.6; }
+.rzofoot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.rzobtns { display: flex; gap: 6px; flex-wrap: wrap; }
+.rzobtns button, .rzwbtn button, .rzaddr > button {
+  border: 1.5px solid var(--primary); background: #fff; color: var(--primary); border-radius: 8px;
+  padding: 6px 12px; font-size: 0.76rem; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+.rzobtns button:hover, .rzwbtn button:hover { background: var(--primary); color: #fff; }
+button.danger { border-color: #dc2626 !important; color: #dc2626 !important; }
+button.danger:hover { background: #dc2626 !important; color: #fff !important; }
+.rzchip { font-size: 0.7rem; font-weight: 700; padding: 3px 10px; border-radius: 12px; }
+.rzchip.live { background: #fff3cd; color: #92400e; }
+.rzchip.ok { background: #d1fae5; color: #065f46; }
+.rzchip.bad { background: #fee2e2; color: #991b1b; }
+.rzwish { display: flex; align-items: center; gap: 12px; border: 1px solid #eee; border-radius: 14px; padding: 10px; margin-bottom: 10px; }
+.rzwish img { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; flex: none; }
+.rzwinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 0.85rem; }
+.rzwinfo span { font-size: 0.74rem; color: #999; }
+.rzwinfo b { color: var(--primary); }
+.rzwbtn { display: flex; gap: 6px; }
+.rzwbtn button { padding: 7px 10px; }
+.rzaddr { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 1px solid #eee; border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; }
+.rzaddr div { display: flex; flex-direction: column; font-size: 0.85rem; }
+.rzaddr span { font-size: 0.76rem; color: #999; }
+.rzlegal { font-size: 0.88rem; line-height: 1.7; color: #555; }
+.rzlegal summary { font-weight: 600; cursor: pointer; padding: 10px 0; color: var(--dark); }
+.rzlegal details { border-bottom: 1px solid #eee; }
+.rzlegal a { color: var(--primary); }
+
+/* ---- menu toolbar ---- */
+.shoptools {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: center; margin: 0 auto 26px;
+  padding: 14px 18px; background: #fff; border-radius: 16px; box-shadow: 0 4px 22px rgba(0, 0, 0, 0.06);
+  font-family: "Poppins", sans-serif; max-width: 980px;
+}
+.stsearch { position: relative; flex: 1 1 220px; min-width: 180px; }
+.stsearch i { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: #aaa; font-size: 0.85rem; }
+.stsearch input { border: 2px solid #eee; border-radius: 10px; padding: 9px 12px 9px 36px; width: 100%; font-size: 0.86rem; font-family: inherit; outline: none; }
+#stSort { border: 2px solid #eee; border-radius: 10px; padding: 9px 12px; font-size: 0.84rem; font-family: inherit; background: #fff; outline: none; }
+.stprice { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; font-weight: 600; color: #555; margin: 0; }
+.stprice input { accent-color: var(--primary); width: 110px; }
+.stveg { font-size: 0.82rem; margin: 0; }
+
+/* ---- checkout additions ---- */
+.rzguest {
+  display: flex; align-items: center; gap: 12px; background: var(--cream); border: 1px dashed var(--secondary);
+  border-radius: 14px; padding: 12px 14px; margin: 0 0 14px; font-family: "Poppins", sans-serif;
+}
+.rzguest > i { font-size: 1.6rem; color: var(--secondary); }
+.rzguest div { flex: 1; display: flex; flex-direction: column; font-size: 0.82rem; }
+.rzguest span { color: #888; font-size: 0.74rem; }
+.rzguest button { background: var(--primary); color: #fff; border: none; border-radius: 8px; padding: 7px 14px; font-size: 0.78rem; font-weight: 600; cursor: pointer; }
+.ckcontact { background: #fff; border-radius: 14px; padding: 14px; margin-bottom: 14px; border: 1px solid #f0e8de; }
+.ckcontact .fctrl { width: 100%; }
+.rzdemo { background: #eff6ff; color: #1e40af; border-radius: 10px; padding: 9px 12px; font-size: 0.76rem; margin-bottom: 12px; font-family: "Poppins", sans-serif; }
+
+/* ---- cookie notice ---- */
+.rzcookie {
+  position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 100001; max-width: 560px; margin: 0 auto;
+  background: #1a1a1a; color: #eee; border-radius: 14px; padding: 12px 16px; display: flex; align-items: center;
+  gap: 14px; font-size: 0.8rem; font-family: "Poppins", sans-serif; transform: translateY(140%); transition: transform 0.4s ease;
+  box-shadow: var(--shadow-lg);
+}
+.rzcookie.show { transform: translateY(0); }
+.rzcookie p { margin: 0; flex: 1; }
+.rzcookie a { color: var(--secondary); }
+.rzcookie button { background: var(--secondary); color: #1a1a1a; border: none; border-radius: 8px; padding: 8px 16px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+
+/* ---- responsive ---- */
+@media (max-width: 991px) {
+  #navmenu .d-flex.align-items-center { flex-wrap: wrap; padding: 10px 0; }
+  .rzbtn { padding: 8px 12px; }
+}
+@media (max-width: 600px) {
+  .rzov { padding: 0; align-items: flex-end; }
+  .rzbox { max-width: 100% !important; max-height: 94vh; border-radius: 22px 22px 0 0; }
+  .rzgrid2 { grid-template-columns: 1fr; }
+  .rzhead.small { padding-left: 18px; }
+  .rzpane { padding: 16px 16px 22px; }
+  .rzform { padding: 16px; }
+  .rztab { padding: 10px 9px; font-size: 0.76rem; }
+  .rzwish { flex-wrap: wrap; }
+  .rzwbtn { width: 100%; justify-content: flex-end; }
+  .shoptools { padding: 12px; gap: 10px; }
+  .stprice { width: 100%; }
+  .stprice input { flex: 1; }
+  #stSort { flex: 1; }
+  .rzcookie { flex-direction: column; align-items: stretch; text-align: center; left: 10px; right: 10px; bottom: 10px; }
+  .rzguest { flex-wrap: wrap; }
+}
