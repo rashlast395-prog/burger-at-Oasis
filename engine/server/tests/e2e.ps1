@@ -6,8 +6,10 @@ param([string]$Bin = (Join-Path $PSScriptRoot '..\..\target\debug'))
 
 # Any unexpected error inside the script is a failure, never a silently skipped check.
 $ErrorActionPreference = 'Stop'
-$server = Join-Path $Bin 'bo-server.exe'
-$device = Join-Path $Bin 'bo-device.exe'
+# Windows PowerShell 5.1 has no $IsWindows; there it is always Windows.
+$ext = if ($null -eq $IsWindows -or $IsWindows) { '.exe' } else { '' }
+$server = Join-Path $Bin "bo-server$ext"
+$device = Join-Path $Bin "bo-device$ext"
 $script:failed = 0
 $script:skipped = 0
 

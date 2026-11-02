@@ -1,0 +1,40 @@
+name: engine
+
+on:
+  push:
+    paths: ["engine/**", ".github/workflows/engine.yml"]
+  pull_request:
+    paths: ["engine/**", ".github/workflows/engine.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+      - name: Unit and integration tests
+        run: cargo test --workspace --locked
+      - name: Release build
+        run: cargo build --release --locked -p bo-server
+      - name: End-to-end check of the real programs
+        shell: pwsh
+        run: ./server/tests/e2e.ps1 -Bin target/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bo-server-linux-x86_64
+          path: |
+            engine/target/release/bo-server
+            engine/target/release/bo-device
+            engine/deploy/
+          retention-days: 14
