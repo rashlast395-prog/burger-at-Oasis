@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["storage"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+crc32c = "0.6"
+tempfile = "3"
