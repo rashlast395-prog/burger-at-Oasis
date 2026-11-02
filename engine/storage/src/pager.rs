@@ -107,6 +107,20 @@ impl Pager {
         self.write_header()
     }
 
+    /// Copy every page to `dest`, verifying each checksum on the way, and return the SHA-256
+    /// of what was written. Any corrupt page aborts with an error.
+    pub(crate) fn backup_copy(&mut self, dest: &mut File) -> Result<[u8; 32]> {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        for id in 0..self.page_count {
+            let buf = read_raw(&mut self.file, id)?;
+            Page::decode(id, &buf)?;
+            dest.write_all(&buf)?;
+            hasher.update(buf);
+        }
+        Ok(hasher.finalize().into())
+    }
+
     /// Force all written data to stable storage.
     pub fn sync(&mut self) -> Result<()> {
         self.file.sync_all()?;

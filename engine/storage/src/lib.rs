@@ -27,6 +27,7 @@
 //! bytes 8..     payload
 //! ```
 
+mod backup;
 mod btree;
 mod db;
 mod page;
@@ -34,6 +35,7 @@ mod pager;
 mod wal;
 
 pub use page::{Page, PageId, PageKind, PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE, PAGE_SIZE};
+pub use backup::{manifest_path_for, BackupInfo};
 pub use btree::{BTree, MAX_KEY, MAX_VALUE};
 pub use db::{wal_path_for, Db, PageRead, Txn};
 pub use pager::{Pager, FORMAT_VERSION, MAGIC};
@@ -57,6 +59,8 @@ pub enum StorageError {
     /// The write-ahead log is damaged in a way that is not a torn final write. Opening is
     /// refused: guessing would risk silently dropping acknowledged transactions.
     WalCorrupt(String),
+    /// A backup failed verification (altered, truncated, damaged or incompatible).
+    BackupInvalid(String),
     /// A key or value exceeds the size limit (or a key is empty).
     TooLarge { what: &'static str, len: usize, max: usize },
     /// The transaction was committed durably, but the follow-up checkpoint failed.
@@ -72,6 +76,7 @@ impl fmt::Display for StorageError {
             StorageError::OutOfRange(p) => write!(f, "page {p} is out of range"),
             StorageError::InvalidPage(p) => write!(f, "page {p} cannot be used for this operation"),
             StorageError::WalCorrupt(s) => write!(f, "write-ahead log is corrupt: {s}"),
+            StorageError::BackupInvalid(s) => write!(f, "backup is not valid: {s}"),
             StorageError::TooLarge { what, len, max } => write!(f, "{what} of {len} bytes is not allowed (limit {max}, minimum 1)"),
             StorageError::PostCommit(e) => write!(f, "transaction is durable but checkpoint failed: {e}"),
         }

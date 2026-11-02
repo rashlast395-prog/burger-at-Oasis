@@ -403,3 +403,44 @@ fn documents_larger_than_a_page_work_with_indexes_updates_and_crashes() {
     assert_eq!(doc["lines"][399]["sku"], "sku-399");
     assert!(e.verify("orders").unwrap().is_empty());
 }
+
+#[test]
+fn engine_backup_restore_returns_the_old_state_and_detects_damage() {
+    let (dir, _path, mut e) = new_engine();
+    setup_orders(&mut e);
+    let mut t = e.begin();
+    t.create_index("orders", "status", false).unwrap();
+    t.create_index("orders", "customer.phone", true).unwrap();
+    t.commit().unwrap();
+    let all = json!({});
+    let before = e.find("orders", &all).unwrap();
+
+    let backup = dir.path().join("orders.bak");
+    let info = e.backup_to(&backup).unwrap();
+    assert_eq!(Engine::verify_backup(&backup).unwrap(), info);
+
+    // The live database moves on: change, delete, add.
+    let mut t = e.begin();
+    t.delete("orders", "o1").unwrap();
+    t.update("orders", "o2", &json!({"status": "done"})).unwrap();
+    t.insert("orders", json!({"_id": "o6", "status": "open", "total": 1.0, "customer": {"phone": "0299"}})).unwrap();
+    t.commit().unwrap();
+    assert_ne!(e.find("orders", &all).unwrap(), before);
+
+    let restored_path = dir.path().join("restored.boasis");
+    Engine::restore(&backup, &restored_path).unwrap();
+    let mut r = Engine::open(&restored_path).unwrap();
+    assert_eq!(r.find("orders", &all).unwrap(), before);
+    assert_eq!(r.explain("orders", &json!({"filter": {"status": "open"}})).unwrap(), "index scan (equality) on status");
+    assert!(r.verify("orders").unwrap().is_empty());
+
+    // A damaged backup is rejected by the engine-level check too.
+    let damaged = dir.path().join("damaged.bak");
+    e.backup_to(&damaged).unwrap();
+    let mut bytes = std::fs::read(&damaged).unwrap();
+    bytes[3 * 8192 + 40] ^= 0xFF;
+    std::fs::write(&damaged, bytes).unwrap();
+    assert!(Engine::verify_backup(&damaged).is_err());
+    assert!(Engine::restore(&damaged, dir.path().join("never.boasis")).is_err());
+    assert!(!dir.path().join("never.boasis").exists());
+}

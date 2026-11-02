@@ -34,6 +34,7 @@ use std::fmt;
 use std::ops::Bound;
 use std::path::Path;
 
+pub use bo_storage::BackupInfo;
 use bo_storage::{BTree, Db, PageRead, StorageError, Txn, MAX_KEY, MAX_VALUE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -155,6 +156,45 @@ impl Engine {
     /// Returns a list of problems (empty = healthy).
     pub fn verify(&mut self, collection: &str) -> Result<Vec<String>> {
         verify_collection(&mut self.db, &self.catalog, collection)
+    }
+
+    /// Write a consistent, verified backup (image + manifest). Never overwrites.
+    pub fn backup_to(&mut self, dest: impl AsRef<Path>) -> Result<BackupInfo> {
+        Ok(self.db.backup_to(dest)?)
+    }
+
+    /// Verify a backup as deeply as possible without touching it: manifest, SHA-256, every
+    /// page checksum, then a trial restore into a scratch directory where the catalog and
+    /// every collection and index are checked against each other. Returns the manifest info,
+    /// or an error naming the first problem.
+    pub fn verify_backup(backup: impl AsRef<Path>) -> Result<BackupInfo> {
+        let info = Db::verify_backup(backup.as_ref())?;
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+        let scratch = std::env::temp_dir().join(format!("bo-verify-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&scratch).map_err(StorageError::from)?;
+        let result = (|| -> Result<()> {
+            let target = scratch.join("trial.boasis");
+            Db::restore(backup.as_ref(), &target)?;
+            let mut engine = Engine::open(&target)?;
+            for name in engine.collections()? {
+                let problems = engine.verify(&name)?;
+                if let Some(p) = problems.first() {
+                    return Err(EngineError::Storage(StorageError::BackupInvalid(format!(
+                        "collection '{name}': {} problem(s), first: {p}",
+                        problems.len()
+                    ))));
+                }
+            }
+            Ok(())
+        })();
+        let _ = std::fs::remove_dir_all(&scratch);
+        result.map(|()| info)
+    }
+
+    /// Restore a verified backup to a new location. Refuses to overwrite anything.
+    pub fn restore(backup: impl AsRef<Path>, target: impl AsRef<Path>) -> Result<BackupInfo> {
+        Engine::verify_backup(backup.as_ref())?;
+        Ok(Db::restore(backup, target)?)
     }
 
     /// Clean shutdown (checkpoints the log).

@@ -23,7 +23,7 @@ use crate::{Result, StorageError};
 const DEFAULT_CHECKPOINT_PAGES: usize = 256;
 
 pub struct Db {
-    pager: Pager,
+    pub(crate) pager: Pager,
     wal: Wal,
     /// Latest committed image of every page not yet copied to the main file.
     overlay: BTreeMap<PageId, Image>,
