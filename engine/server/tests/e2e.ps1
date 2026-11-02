@@ -16,8 +16,9 @@ $script:skipped = 0
 function Check($ok, $what) {
     if ($ok) { Write-Host "  ok    $what" } else { Write-Host "  FAIL  $what"; $script:failed++ }
 }
-# Windows PowerShell 5.1 drops the double quotes inside arguments to native programs; escape them.
-function J($json) { $json.Replace('"', '\"') }
+# Windows PowerShell 5.1 drops the double quotes inside arguments to native programs; escape
+# them there. PowerShell 7 passes them through correctly, and escaping would corrupt the JSON.
+function J($json) { if ($PSVersionTable.PSVersion.Major -lt 7) { $json.Replace('"', '\"') } else { $json } }
 function Run($exe, [string[]]$a) {
     $ErrorActionPreference = 'Continue'   # native stderr is data here, not an error
     $out = & $exe @a 2>&1 | ForEach-Object { "$_" }
