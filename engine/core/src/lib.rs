@@ -20,7 +20,8 @@
 //! same type (numbers with numbers, strings with strings).
 //!
 //! ## Limits (documented, enforced)
-//! * A serialized document may be at most [`MAX_DOC_BYTES`]; there are no overflow pages yet.
+//! * A serialized document may be at most [`MAX_DOC_BYTES`] (1 MiB); larger ones live in
+//!   overflow pages transparently.
 //! * Only scalar values (null, bool, number, string) can be indexed; strings containing NUL
 //!   cannot; an index key (value + id) must fit the B+ tree key limit.
 //! * Results are materialised in memory; sorting is done in memory after filtering.

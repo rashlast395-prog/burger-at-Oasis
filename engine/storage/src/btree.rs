@@ -5,13 +5,19 @@
 //! * The **root page id never changes** (a split moves the old root's contents to a new
 //!   page), so a catalog can store it once.
 //! * Keys are compared as unsigned bytes. At most [`MAX_KEY`] bytes per key and
-//!   [`MAX_VALUE`] per value; there are no overflow pages yet, larger values are rejected.
+//!   [`MAX_VALUE`] (1 MiB) per value.
+//! * Values up to `INLINE_MAX` bytes live in the leaf. Larger values are written to a chain of
+//!   `Data` pages and the leaf keeps a 13-byte reference. Replacing or deleting a key frees
+//!   its chain in the same transaction.
 //! * Only empty nodes are reclaimed on delete; underfull-but-non-empty nodes are not merged.
 //!   Space from heavy deletion is reused by later inserts but the tree does not shrink.
 //!
 //! Node layout (inside the page payload):
 //! ```text
-//! leaf:     1 | count u16 | count x ( klen u16 | vlen u16 | key | value )
+//! leaf:     1 | count u16 | count x ( klen u16 | vlen u16 | key | stored value )
+//! stored value: 0 | bytes                       (inline)
+//!               1 | total_len u32 | first u64   (overflow chain)
+//! overflow page (kind Data): next u64 | chunk_len u32 | chunk bytes
 //! internal: 2 | count u16 | child0 u64 | count x ( klen u16 | key | child u64 )
 //! ```
 //! Child `i` holds keys `k` with `keys[i-1] <= k < keys[i]`.
@@ -23,7 +29,12 @@ use crate::page::{Page, PageId, PageKind, PAGE_PAYLOAD_SIZE};
 use crate::{Result, StorageError};
 
 pub const MAX_KEY: usize = 255;
-pub const MAX_VALUE: usize = 2048;
+pub const MAX_VALUE: usize = 1 << 20;
+/// Values longer than this go to overflow pages.
+const INLINE_MAX: usize = 1500;
+const CHUNK: usize = PAGE_PAYLOAD_SIZE - 12;
+const TAG_INLINE: u8 = 0;
+const TAG_OVERFLOW: u8 = 1;
 
 const LEAF: u8 = 1;
 const INTERNAL: u8 = 2;
@@ -131,6 +142,106 @@ fn store(txn: &mut Txn<'_>, id: PageId, node: &Node) -> Result<()> {
     txn.write(id, &node.encode())
 }
 
+fn corrupt(page: PageId, why: &str) -> StorageError {
+    StorageError::Corrupt { page, reason: format!("b-tree overflow: {why}") }
+}
+
+/// Turn a user value into its stored form, writing an overflow chain if it is large.
+fn encode_value(txn: &mut Txn<'_>, value: &[u8]) -> Result<Vec<u8>> {
+    if value.len() <= INLINE_MAX {
+        let mut out = Vec::with_capacity(1 + value.len());
+        out.push(TAG_INLINE);
+        out.extend_from_slice(value);
+        return Ok(out);
+    }
+    let chunks: Vec<&[u8]> = value.chunks(CHUNK).collect();
+    let mut ids = Vec::with_capacity(chunks.len());
+    for _ in &chunks {
+        ids.push(txn.allocate()?);
+    }
+    for (i, chunk) in chunks.iter().enumerate() {
+        let mut page = Page::new(PageKind::Data);
+        let p = page.payload_mut();
+        let next = ids.get(i + 1).copied().unwrap_or(0);
+        p[0..8].copy_from_slice(&next.to_le_bytes());
+        p[8..12].copy_from_slice(&(chunk.len() as u32).to_le_bytes());
+        p[12..12 + chunk.len()].copy_from_slice(chunk);
+        txn.write(ids[i], &page)?;
+    }
+    let mut out = vec![TAG_OVERFLOW];
+    out.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    out.extend_from_slice(&ids[0].to_le_bytes());
+    Ok(out)
+}
+
+/// Walk an overflow chain, validating it, and call `visit` with each page id and chunk.
+fn walk_chain<R: PageRead>(r: &mut R, total: usize, first: PageId, mut visit: impl FnMut(PageId, &[u8])) -> Result<()> {
+    let pages = total.div_ceil(CHUNK);
+    let mut id = first;
+    let mut seen = 0usize;
+    let mut bytes = 0usize;
+    while id != 0 {
+        if seen >= pages {
+            return Err(corrupt(id, "chain is longer than the recorded length"));
+        }
+        let page = r.read_page(id)?;
+        if page.kind() != PageKind::Data {
+            return Err(corrupt(id, "chain page is not a data page"));
+        }
+        let p = page.payload();
+        let next = u64::from_le_bytes(p[0..8].try_into().unwrap());
+        let len = u32::from_le_bytes(p[8..12].try_into().unwrap()) as usize;
+        if len == 0 || len > CHUNK {
+            return Err(corrupt(id, "bad chunk length"));
+        }
+        visit(id, &p[12..12 + len]);
+        bytes += len;
+        seen += 1;
+        id = next;
+    }
+    if seen != pages || bytes != total {
+        return Err(corrupt(first, "chain is shorter than the recorded length"));
+    }
+    Ok(())
+}
+
+fn parse_ref(stored: &[u8]) -> Option<(usize, PageId)> {
+    if stored.len() != 13 {
+        return None;
+    }
+    Some((u32::from_le_bytes(stored[1..5].try_into().unwrap()) as usize, u64::from_le_bytes(stored[5..13].try_into().unwrap())))
+}
+
+/// The user-visible value for a stored value, reading the overflow chain if needed.
+fn read_value<R: PageRead>(r: &mut R, page: PageId, stored: &[u8]) -> Result<Vec<u8>> {
+    match stored.first() {
+        Some(&TAG_INLINE) => Ok(stored[1..].to_vec()),
+        Some(&TAG_OVERFLOW) => {
+            let (total, first) = parse_ref(stored).ok_or_else(|| corrupt(page, "bad overflow reference"))?;
+            if total <= INLINE_MAX || total > MAX_VALUE {
+                return Err(corrupt(page, "overflow reference has an impossible length"));
+            }
+            let mut out = Vec::with_capacity(total);
+            walk_chain(r, total, first, |_, chunk| out.extend_from_slice(chunk))?;
+            Ok(out)
+        }
+        _ => Err(corrupt(page, "unknown stored value tag")),
+    }
+}
+
+/// Release the overflow chain (if any) of a stored value.
+fn free_value(txn: &mut Txn<'_>, page: PageId, stored: &[u8]) -> Result<()> {
+    if stored.first() == Some(&TAG_OVERFLOW) {
+        let (total, first) = parse_ref(stored).ok_or_else(|| corrupt(page, "bad overflow reference"))?;
+        let mut ids = Vec::new();
+        walk_chain(txn, total, first, |id, _| ids.push(id))?;
+        for id in ids {
+            txn.free(id)?;
+        }
+    }
+    Ok(())
+}
+
 struct Split {
     sep: Vec<u8>,
     right: PageId,
@@ -163,7 +274,10 @@ impl BTree {
         loop {
             match load(r, id)? {
                 Node::Leaf(e) => {
-                    return Ok(e.binary_search_by(|(k, _)| k.as_slice().cmp(key)).ok().map(|i| e[i].1.clone()));
+                    return match e.binary_search_by(|(k, _)| k.as_slice().cmp(key)) {
+                        Ok(i) => Ok(Some(read_value(r, id, &e[i].1)?)),
+                        Err(_) => Ok(None),
+                    };
                 }
                 Node::Internal { keys, children } => {
                     id = children[keys.partition_point(|k| k.as_slice() <= key)];
@@ -180,7 +294,16 @@ impl BTree {
         if value.len() > MAX_VALUE {
             return Err(StorageError::TooLarge { what: "value", len: value.len(), max: MAX_VALUE });
         }
-        let (old, split) = insert_rec(txn, self.root, key, value)?;
+        let stored = encode_value(txn, value)?;
+        let (old_stored, split) = insert_rec(txn, self.root, key, &stored)?;
+        let old = match old_stored {
+            Some(s) => {
+                let v = read_value(txn, self.root, &s)?;
+                free_value(txn, self.root, &s)?;
+                Some(v)
+            }
+            None => None,
+        };
         if let Some(s) = split {
             // The root page holds the left half. Move it to a new page and make the root a
             // two-child internal node, so the root id stays the same.
@@ -194,10 +317,10 @@ impl BTree {
 
     /// Remove a key. Returns its value if it existed.
     pub fn delete(&self, txn: &mut Txn<'_>, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        let (old, empty) = delete_rec(txn, self.root, key)?;
-        if old.is_none() {
-            return Ok(None);
-        }
+        let (old_stored, empty) = delete_rec(txn, self.root, key)?;
+        let Some(stored) = old_stored else { return Ok(None) };
+        let old = Some(read_value(txn, self.root, &stored)?);
+        free_value(txn, self.root, &stored)?;
         if empty {
             store(txn, self.root, &Node::Leaf(Vec::new()))?;
         }
@@ -341,7 +464,7 @@ fn scan<R: PageRead>(
 ) -> Result<()> {
     match load(r, page)? {
         Node::Leaf(e) => {
-            for (k, v) in e {
+            for (k, stored) in e {
                 if out.len() >= limit {
                     break;
                 }
@@ -356,6 +479,7 @@ fn scan<R: PageRead>(
                     Bound::Unbounded => true,
                 };
                 if after_start && before_end {
+                    let v = read_value(r, page, &stored)?;
                     out.push((k, v));
                 }
             }
@@ -392,6 +516,9 @@ fn check_rec<R: PageRead>(r: &mut R, page: PageId, lo: Option<&[u8]>, hi: Option
             }
             if e.iter().any(|(k, _)| !in_bounds(k)) {
                 return Err(bad("leaf key outside its separator bounds".into()));
+            }
+            for (_, stored) in &e {
+                read_value(r, page, stored)?; // validates inline tags and whole overflow chains
             }
             Ok((e.len(), 1))
         }

@@ -113,7 +113,7 @@ fn large_values_force_deep_trees_and_stay_correct() {
     let mut rng = Rng(9);
     let mut t = db.begin();
     for n in 0..2500u64 {
-        let v = vec![(n % 251) as u8; MAX_VALUE];
+        let v = vec![(n % 251) as u8; 1500]; // largest inline value: forces many leaves
         tree.insert(&mut t, &key(rng.below(1_000_000)), &v).unwrap();
     }
     t.commit().unwrap();
@@ -207,7 +207,12 @@ fn randomized_operations_match_a_model_including_crashes_and_rollbacks() {
                     let removed = tree.delete(&mut t, &k).unwrap();
                     assert_eq!(removed, m.remove(&k), "delete result");
                 } else {
-                    let max = if rng.below(4) == 0 { MAX_VALUE } else { 120 };
+                    let max = match rng.below(8) {
+                        0 => 30_000, // overflow chains of several pages
+                        1 => 1500,
+                        2 => 3000, // just over the inline limit
+                        _ => 120,
+                    };
                     let v = val(&mut rng, max);
                     let old = tree.insert(&mut t, &k, &v).unwrap();
                     assert_eq!(old, m.insert(k, v), "insert result");
@@ -282,4 +287,106 @@ fn the_root_page_id_is_stable_across_many_splits_and_reopen() {
     let again = BTree::open(root);
     assert_eq!(again.check(&mut db).unwrap(), 1000);
     assert_eq!(again.get(&mut db, &key(777)).unwrap(), Some(vec![5u8; 400]));
+}
+
+// ---- overflow pages ----
+
+fn pattern(len: usize, seed: u8) -> Vec<u8> {
+    (0..len).map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed)).collect()
+}
+
+#[test]
+fn values_of_every_interesting_size_round_trip_through_overflow() {
+    let (_d, path, mut db, tree) = setup();
+    let sizes = [0usize, 1, 1499, 1500, 1501, 8171, 8172, 8173, 16_344, 16_345, 100_000, MAX_VALUE];
+    let mut t = db.begin();
+    for (i, n) in sizes.iter().enumerate() {
+        tree.insert(&mut t, &key(i as u64), &pattern(*n, i as u8)).unwrap();
+    }
+    t.commit().unwrap();
+    for (i, n) in sizes.iter().enumerate() {
+        assert_eq!(tree.get(&mut db, &key(i as u64)).unwrap(), Some(pattern(*n, i as u8)), "size {n}");
+    }
+    let all = tree.range(&mut db, Bound::Unbounded, Bound::Unbounded, None).unwrap();
+    assert_eq!(all.len(), sizes.len());
+    assert_eq!(all[11].1.len(), MAX_VALUE);
+    assert_eq!(tree.check(&mut db).unwrap(), sizes.len());
+    assert!(db.verify().unwrap().is_empty());
+    drop(db);
+    let mut db = Db::open(&path).unwrap();
+    assert_eq!(tree.get(&mut db, &key(10)).unwrap(), Some(pattern(100_000, 10)));
+}
+
+#[test]
+fn replacing_and_deleting_large_values_frees_their_pages() {
+    let (_d, _p, mut db, tree) = setup();
+    let mut t = db.begin();
+    tree.insert(&mut t, b"k", &pattern(200_000, 1)).unwrap();
+    t.commit().unwrap();
+    let after_first = db.page_count();
+    // Replace many times with different large sizes: the file must stop growing.
+    for round in 0..20u8 {
+        let mut t = db.begin();
+        let old = tree.insert(&mut t, b"k", &pattern(150_000 + round as usize * 1000, round)).unwrap();
+        assert!(old.is_some());
+        t.commit().unwrap();
+    }
+    assert!(db.page_count() <= after_first + 30, "{} vs {}", db.page_count(), after_first);
+    // Large -> small frees the chain; delete frees too.
+    let mut t = db.begin();
+    tree.insert(&mut t, b"k", b"tiny").unwrap();
+    t.commit().unwrap();
+    let small = db.page_count();
+    for round in 0..10u8 {
+        let mut t = db.begin();
+        tree.insert(&mut t, b"k", &pattern(120_000, round)).unwrap();
+        assert!(tree.delete(&mut t, b"k").unwrap().is_some());
+        t.commit().unwrap();
+    }
+    assert!(db.page_count() <= small + 20, "pages leaked: {} vs {}", db.page_count(), small);
+    assert_eq!(tree.check(&mut db).unwrap(), 0);
+    assert!(db.verify().unwrap().is_empty());
+}
+
+#[test]
+fn a_rolled_back_large_write_leaves_nothing_behind() {
+    let (_d, _p, mut db, tree) = setup();
+    let pages = db.page_count();
+    let mut t = db.begin();
+    tree.insert(&mut t, b"k", &pattern(500_000, 3)).unwrap();
+    drop(t);
+    assert_eq!(db.page_count(), pages);
+    assert_eq!(tree.get(&mut db, b"k").unwrap(), None);
+}
+
+#[test]
+fn a_damaged_overflow_page_is_corruption_not_wrong_data() {
+    let (_d, path, mut db, tree) = setup();
+    let mut t = db.begin();
+    tree.insert(&mut t, b"big", &pattern(60_000, 7)).unwrap();
+    t.commit().unwrap();
+    db.close().unwrap();
+    // The chain is the run of pages right after the root; damage one in the middle.
+    let victim = tree.root() + 3;
+    let mut f = OpenOptions::new().read(true).write(true).open(&path).unwrap();
+    f.seek(SeekFrom::Start(victim * PAGE_SIZE as u64 + 500)).unwrap();
+    f.write_all(&[0xAB]).unwrap();
+    drop(f);
+    let mut db = Db::open(&path).unwrap();
+    assert!(matches!(tree.get(&mut db, b"big"), Err(StorageError::Corrupt { .. })));
+    assert!(matches!(tree.check(&mut db), Err(StorageError::Corrupt { .. })));
+}
+
+#[test]
+fn large_values_survive_crashes_via_the_log() {
+    let (_d, path, mut db, tree) = setup();
+    let mut t = db.begin();
+    tree.insert(&mut t, b"a", &pattern(300_000, 1)).unwrap();
+    tree.insert(&mut t, b"b", &pattern(40_000, 2)).unwrap();
+    t.commit().unwrap();
+    drop(db); // crash before any checkpoint
+    let mut db = Db::open(&path).unwrap();
+    assert_eq!(tree.get(&mut db, b"a").unwrap(), Some(pattern(300_000, 1)));
+    assert_eq!(tree.get(&mut db, b"b").unwrap(), Some(pattern(40_000, 2)));
+    assert_eq!(tree.check(&mut db).unwrap(), 2);
 }

@@ -376,3 +376,30 @@ fn randomized_queries_match_brute_force_with_and_without_indexes() {
         assert!(e.verify("fast").unwrap().is_empty());
     }
 }
+
+#[test]
+fn documents_larger_than_a_page_work_with_indexes_updates_and_crashes() {
+    let (_d, path, mut e) = new_engine();
+    let mut t = e.begin();
+    t.create_collection("orders").unwrap();
+    t.create_index("orders", "status", false).unwrap();
+    let lines: Vec<Value> = (0..400).map(|i| json!({"sku": format!("sku-{i}"), "qty": i % 7, "note": "x".repeat(40)})).collect();
+    for i in 0..30 {
+        t.insert("orders", json!({"_id": format!("o{i:02}"), "status": if i % 2 == 0 { "open" } else { "done" }, "lines": lines.clone()})).unwrap();
+    }
+    t.commit().unwrap();
+    assert!(serde_json::to_vec(&e.get("orders", "o00").unwrap().unwrap()).unwrap().len() > 20_000);
+    assert_eq!(e.find("orders", &json!({"filter": {"status": "open"}})).unwrap().len(), 15);
+
+    let mut t = e.begin();
+    t.update("orders", "o00", &json!({"status": "done"})).unwrap();
+    t.delete("orders", "o02").unwrap();
+    t.commit().unwrap();
+    drop(e.into_db()); // crash
+    let mut e = Engine::open(&path).unwrap();
+    assert_eq!(e.find("orders", &json!({"filter": {"status": "open"}})).unwrap().len(), 13);
+    let doc = e.get("orders", "o01").unwrap().unwrap();
+    assert_eq!(doc["lines"].as_array().unwrap().len(), 400);
+    assert_eq!(doc["lines"][399]["sku"], "sku-399");
+    assert!(e.verify("orders").unwrap().is_empty());
+}
