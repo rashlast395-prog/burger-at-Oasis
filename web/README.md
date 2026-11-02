@@ -11,11 +11,11 @@ The live storefront (`../Burger/sarab`, static HTML) is unchanged and still what
 | Server-side pricing (`src/modules/orders/pricing.ts`) | Done, tested. Browser never sets prices |
 | Order creation with duplicate protection (`order.service.ts`) | Done, tested against an in-memory repository |
 | Order status state machine (`status.ts`) | Done, tested |
-| API: `GET /api/menu`, `POST /api/orders/quote`, `POST /api/orders` | Run end to end against the **engine store** on a laptop. Not yet run against PostgreSQL |
-| Seed scripts (`prisma/seed.ts`, `scripts/engine-seed.ts`) | Engine seed run; Prisma seed not yet run. Shared placeholder menu in `prisma/menu-data.ts` |
+| API: `GET /api/menu`, `POST /api/orders/quote`, `POST /api/orders` | Run end to end on both stores: the engine and local PostgreSQL 17 |
+| Seed scripts (`prisma/seed.ts`, `scripts/engine-seed.ts`) | Both run. Shared placeholder menu in `prisma/menu-data.ts` |
 | Order store selection (`src/server/repositories/index.ts`) | `ORDER_STORE=prisma` (default) or `engine` |
 | Storefront (`/`): menu, sizes/extras, cart, server-priced totals, promo codes, checkout | Done, tested in the browser. Cash on delivery/collection only |
-| Staff order board (`/staff`): sign-in, live orders, status changes, record cash | Done, tested in the browser. **Engine store only** for now |
+| Staff order board (`/staff`): sign-in, live orders, status changes, record cash | Done, tested on both stores (PostgreSQL: transitions checked in a transaction, two-till safe, every change in `OrderEvent`) |
 | Auth, payments (Paystack), admin, POS, kitchen, inventory deduction, notifications | Not started |
 
 ## Key decisions

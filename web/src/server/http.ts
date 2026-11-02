@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { PricingError } from "@/modules/orders/pricing";
 import { EngineError } from "@/server/engine/client";
-import { StoreUnsupported } from "@/server/staff/orders";
 
 /** Central error mapping so route handlers never leak internals. */
 export function handleError(e: unknown): NextResponse {
@@ -23,8 +22,9 @@ export function handleError(e: unknown): NextResponse {
     console.error(e.message);
     return NextResponse.json({ error: "UNAVAILABLE", message: "Ordering is temporarily unavailable. Please try again shortly." }, { status: 503 });
   }
-  if (e instanceof StoreUnsupported) {
-    return NextResponse.json({ error: "NOT_IMPLEMENTED", message: e.message }, { status: 501 });
+  if (e instanceof Error && e.name === "StaffConflict") {
+    // Checked by name so this module never has to load Prisma for the engine store.
+    return NextResponse.json({ error: "CONFLICT", message: e.message }, { status: 409 });
   }
   if (e instanceof RangeError) {
     return NextResponse.json({ error: "INVALID", message: e.message }, { status: 422 });

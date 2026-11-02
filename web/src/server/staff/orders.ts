@@ -1,15 +1,8 @@
-/** Staff operations on orders. Currently backed by the engine only. */
+/** Staff operations on orders, for whichever store is active (engine or PostgreSQL). */
 import { engine } from "@/server/engine/client";
 import { orderStore } from "@/server/repositories";
 
-export class StoreUnsupported extends Error {
-  constructor() {
-    super("Staff tools currently need ORDER_STORE=engine; the PostgreSQL version is not built yet.");
-    this.name = "StoreUnsupported";
-  }
-}
-
-/** Order statuses as the engine names them, in the order a kitchen sees them. */
+/** Order statuses as the board names them, in the order a kitchen sees them. */
 export const BOARD_STATUSES = ["placed", "accepted", "preparing", "ready", "out_for_delivery", "completed", "cancelled"] as const;
 export type BoardStatus = (typeof BOARD_STATUSES)[number];
 
@@ -33,26 +26,24 @@ export interface StaffOrder {
   payment: { status: string; paid: number; refunded: number; net: number };
 }
 
-function ensureEngine() {
-  if (orderStore() !== "engine") throw new StoreUnsupported();
-}
+const prisma = () => import("./prisma-orders");
 
 export async function listOrders(): Promise<StaffOrder[]> {
-  ensureEngine();
+  if (orderStore() === "prisma") return (await prisma()).listOrders();
   const res = await engine<{ orders: StaffOrder[] }>("GET", "/orders");
   return (res?.orders ?? []).sort((a, b) => b.created_at - a.created_at);
 }
 
 export async function changeStatus(id: string, status: string): Promise<StaffOrder> {
-  ensureEngine();
   if (!(BOARD_STATUSES as readonly string[]).includes(status)) throw new RangeError(`unknown status ${status}`);
+  if (orderStore() === "prisma") return (await prisma()).changeStatus(id, status as BoardStatus);
   const res = await engine<{ order: StaffOrder }>("POST", `/orders/${encodeURIComponent(id)}/status`, { status });
   return res!.order;
 }
 
 export async function takeCash(id: string, amount: number) {
-  ensureEngine();
   if (!Number.isInteger(amount) || amount <= 0) throw new RangeError("amount must be a positive whole number of pesewas");
+  if (orderStore() === "prisma") return (await prisma()).takeCash(id, amount);
   const res = await engine<{ payment: StaffOrder["payment"] & { total: number } }>("POST", `/orders/${encodeURIComponent(id)}/payments`, {
     method: "cash",
     amount,
