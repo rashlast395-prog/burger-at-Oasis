@@ -20,7 +20,7 @@ fn value(n: u64, len: usize) -> Vec<u8> {
 fn populated() -> (TempDir, PathBuf, Db, BTree, Model) {
     let dir = tempdir().unwrap();
     let path = dir.path().join("src.boasis");
-    let mut db = Db::create(&path).unwrap();
+    let db = Db::create(&path).unwrap();
     let mut t = db.begin();
     let tree = BTree::create(&mut t).unwrap();
     let mut model = Model::new();
@@ -49,7 +49,7 @@ fn flip(path: &Path, offset: u64) {
 
 #[test]
 fn backup_then_restore_reproduces_the_database_exactly() {
-    let (dir, _p, mut db, tree, model) = populated();
+    let (dir, _p, db, tree, model) = populated();
     let backup = dir.path().join("b1.bak");
     let info = db.backup_to(&backup).unwrap();
     assert!(info.page_count > 10);
@@ -66,7 +66,7 @@ fn backup_then_restore_reproduces_the_database_exactly() {
 fn a_backup_includes_committed_data_that_was_never_checkpointed() {
     let (dir, path, db, tree, mut model) = populated();
     drop(db); // crash: everything is only in the log
-    let mut db = Db::open(&path).unwrap();
+    let db = Db::open(&path).unwrap();
     let mut t = db.begin();
     tree.insert(&mut t, b"late", b"committed just before the backup").unwrap();
     t.commit().unwrap();
@@ -154,7 +154,7 @@ fn a_corrupt_source_never_produces_a_backup() {
     let (dir, path, db, _t, _m) = populated();
     db.close().unwrap();
     flip(&path, 4 * PAGE_SIZE as u64 + 200);
-    let mut db = Db::open(&path).unwrap();
+    let db = Db::open(&path).unwrap();
     let backup = dir.path().join("bad.bak");
     assert!(matches!(db.backup_to(&backup), Err(StorageError::Corrupt { .. })));
     assert!(!backup.exists());
@@ -169,7 +169,7 @@ fn a_corrupt_source_never_produces_a_backup() {
 
 #[test]
 fn nothing_is_ever_overwritten() {
-    let (dir, _p, mut db, _t, _m) = populated();
+    let (dir, _p, db, _t, _m) = populated();
     let backup = dir.path().join("b.bak");
     db.backup_to(&backup).unwrap();
     let before = std::fs::read(&backup).unwrap();
@@ -190,7 +190,7 @@ fn nothing_is_ever_overwritten() {
 
 #[test]
 fn restoring_a_damaged_backup_is_refused_and_leaves_nothing() {
-    let (dir, _p, mut db, _t, _m) = populated();
+    let (dir, _p, db, _t, _m) = populated();
     let backup = dir.path().join("b.bak");
     db.backup_to(&backup).unwrap();
     flip(&backup, 2 * PAGE_SIZE as u64 + 9);

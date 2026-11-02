@@ -35,7 +35,7 @@ use std::ops::Bound;
 use std::path::Path;
 
 pub use bo_storage::BackupInfo;
-use bo_storage::{BTree, Db, PageRead, StorageError, Txn, MAX_KEY, MAX_VALUE};
+use bo_storage::{BTree, Db, PageRead, Snapshot, StorageError, Txn, MAX_KEY, MAX_VALUE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -110,14 +110,48 @@ struct Meta {
 
 // ---------------------------------------------------------------- engine
 
+/// A handle to an open database. Cloning is cheap and the clones share one database: any
+/// number of threads may read, and writers take turns.
+#[derive(Clone)]
 pub struct Engine {
     db: Db,
     catalog: BTree,
 }
 
+/// A frozen view of the database for one thread. It sees exactly the data committed when it
+/// was created, however much is written afterwards, and never blocks or is blocked by the
+/// writer. While any `Reader` is alive, checkpoints are postponed (the log grows), so drop it
+/// when done.
+pub struct Reader {
+    snap: Snapshot,
+    catalog: BTree,
+}
+
+impl Reader {
+    pub fn get(&mut self, collection: &str, id: &str) -> Result<Option<Value>> {
+        get_doc(&mut self.snap, &self.catalog, collection, id)
+    }
+
+    pub fn find(&mut self, collection: &str, query: &Value) -> Result<Vec<Value>> {
+        find_docs(&mut self.snap, &self.catalog, collection, query)
+    }
+
+    pub fn explain(&mut self, collection: &str, query: &Value) -> Result<String> {
+        explain_query(&mut self.snap, &self.catalog, collection, query)
+    }
+
+    pub fn collections(&mut self) -> Result<Vec<String>> {
+        list_collections(&mut self.snap, &self.catalog)
+    }
+
+    pub fn verify(&mut self, collection: &str) -> Result<Vec<String>> {
+        verify_collection(&mut self.snap, &self.catalog, collection)
+    }
+}
+
 impl Engine {
     pub fn create(path: impl AsRef<Path>) -> Result<Engine> {
-        let mut db = Db::create(path)?;
+        let db = Db::create(path)?;
         let mut t = db.begin();
         let catalog = BTree::create(&mut t)?;
         debug_assert_eq!(catalog.root(), 1);
@@ -126,40 +160,49 @@ impl Engine {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Engine> {
-        let mut db = Db::open(path)?;
+        let db = Db::open(path)?;
         let catalog = BTree::open(1);
-        catalog.check(&mut db)?; // refuses a database whose catalog is damaged
+        let mut snap = db.snapshot();
+        catalog.check(&mut snap)?; // refuses a database whose catalog is damaged
+        drop(snap);
         Ok(Engine { db, catalog })
     }
 
-    pub fn begin(&mut self) -> Tx<'_> {
+    /// Start a write transaction (waits if another thread has one open).
+    pub fn begin(&self) -> Tx<'_> {
         Tx { txn: self.db.begin(), catalog: self.catalog }
     }
 
-    pub fn get(&mut self, collection: &str, id: &str) -> Result<Option<Value>> {
-        get_doc(&mut self.db, &self.catalog, collection, id)
+    /// Freeze the database as of now for repeatable reads (see [`Reader`]).
+    pub fn reader(&self) -> Reader {
+        Reader { snap: self.db.snapshot(), catalog: self.catalog }
     }
 
-    pub fn find(&mut self, collection: &str, query: &Value) -> Result<Vec<Value>> {
-        find_docs(&mut self.db, &self.catalog, collection, query)
+    // One-shot reads: each takes its own snapshot so a single call is always consistent.
+    pub fn get(&self, collection: &str, id: &str) -> Result<Option<Value>> {
+        self.reader().get(collection, id)
     }
 
-    pub fn explain(&mut self, collection: &str, query: &Value) -> Result<String> {
-        explain_query(&mut self.db, &self.catalog, collection, query)
+    pub fn find(&self, collection: &str, query: &Value) -> Result<Vec<Value>> {
+        self.reader().find(collection, query)
     }
 
-    pub fn collections(&mut self) -> Result<Vec<String>> {
-        list_collections(&mut self.db, &self.catalog)
+    pub fn explain(&self, collection: &str, query: &Value) -> Result<String> {
+        self.reader().explain(collection, query)
+    }
+
+    pub fn collections(&self) -> Result<Vec<String>> {
+        self.reader().collections()
     }
 
     /// Check every tree of a collection and that each index matches its documents exactly.
     /// Returns a list of problems (empty = healthy).
-    pub fn verify(&mut self, collection: &str) -> Result<Vec<String>> {
-        verify_collection(&mut self.db, &self.catalog, collection)
+    pub fn verify(&self, collection: &str) -> Result<Vec<String>> {
+        self.reader().verify(collection)
     }
 
     /// Write a consistent, verified backup (image + manifest). Never overwrites.
-    pub fn backup_to(&mut self, dest: impl AsRef<Path>) -> Result<BackupInfo> {
+    pub fn backup_to(&self, dest: impl AsRef<Path>) -> Result<BackupInfo> {
         Ok(self.db.backup_to(dest)?)
     }
 
@@ -175,7 +218,7 @@ impl Engine {
         let result = (|| -> Result<()> {
             let target = scratch.join("trial.boasis");
             Db::restore(backup.as_ref(), &target)?;
-            let mut engine = Engine::open(&target)?;
+            let engine = Engine::open(&target)?;
             for name in engine.collections()? {
                 let problems = engine.verify(&name)?;
                 if let Some(p) = problems.first() {

@@ -33,7 +33,7 @@ fn val(rng: &mut Rng, max: usize) -> Vec<u8> {
 fn setup() -> (TempDir, PathBuf, Db, BTree) {
     let dir = tempdir().unwrap();
     let path = dir.path().join("t.boasis");
-    let mut db = Db::create(&path).unwrap();
+    let db = Db::create(&path).unwrap();
     let mut t = db.begin();
     let tree = BTree::create(&mut t).unwrap();
     t.commit().unwrap();
@@ -65,7 +65,7 @@ fn insert_get_replace_delete_basics() {
 
 #[test]
 fn empty_value_is_allowed_empty_key_and_oversize_are_rejected() {
-    let (_d, _p, mut db, tree) = setup();
+    let (_d, _p, db, tree) = setup();
     let mut t = db.begin();
     tree.insert(&mut t, b"k", b"").unwrap();
     assert_eq!(tree.get(&mut t, b"k").unwrap(), Some(Vec::new()));
@@ -222,7 +222,9 @@ fn randomized_operations_match_a_model_including_crashes_and_rollbacks() {
             if rng.below(4) != 0 {
                 t.commit().unwrap();
                 model = m;
-            } // else: dropped = rolled back
+            } else {
+                drop(t); // rolled back (also releases the writer lock)
+            }
             if rng.below(5) == 0 {
                 drop(db); // crash
                 db = Db::open(&path).unwrap();
@@ -255,7 +257,7 @@ fn a_rolled_back_transaction_leaves_no_trace() {
 
 #[test]
 fn a_damaged_node_is_reported_as_corruption_not_wrong_data() {
-    let (_d, path, mut db, tree) = setup();
+    let (_d, path, db, tree) = setup();
     let mut t = db.begin();
     for n in 0..300u64 {
         tree.insert(&mut t, &key(n), &vec![2u8; 300]).unwrap();
@@ -275,7 +277,7 @@ fn a_damaged_node_is_reported_as_corruption_not_wrong_data() {
 
 #[test]
 fn the_root_page_id_is_stable_across_many_splits_and_reopen() {
-    let (_d, path, mut db, tree) = setup();
+    let (_d, path, db, tree) = setup();
     let root = tree.root();
     let mut t = db.begin();
     for n in 0..1000u64 {
@@ -361,7 +363,7 @@ fn a_rolled_back_large_write_leaves_nothing_behind() {
 
 #[test]
 fn a_damaged_overflow_page_is_corruption_not_wrong_data() {
-    let (_d, path, mut db, tree) = setup();
+    let (_d, path, db, tree) = setup();
     let mut t = db.begin();
     tree.insert(&mut t, b"big", &pattern(60_000, 7)).unwrap();
     t.commit().unwrap();
@@ -379,7 +381,7 @@ fn a_damaged_overflow_page_is_corruption_not_wrong_data() {
 
 #[test]
 fn large_values_survive_crashes_via_the_log() {
-    let (_d, path, mut db, tree) = setup();
+    let (_d, path, db, tree) = setup();
     let mut t = db.begin();
     tree.insert(&mut t, b"a", &pattern(300_000, 1)).unwrap();
     tree.insert(&mut t, b"b", &pattern(40_000, 2)).unwrap();

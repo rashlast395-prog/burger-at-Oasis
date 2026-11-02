@@ -13,7 +13,8 @@
 //!   still not crash-atomic; use [`Db`].
 //!
 //! ## Known limits
-//! * Single writer; no concurrent readers yet. Whole-page redo log (no undo, no logical records).
+//! * One writer at a time; any number of snapshot readers. Whole-page redo log (no undo, no
+//!   logical records). Open snapshots postpone checkpoints, so the log grows while they live.
 //! * A damaged *final* WAL record is indistinguishable from a torn write and is dropped;
 //!   damage earlier in the log refuses to open.
 //! * Not yet crash-tested against real power loss, only against simulated file damage.
@@ -37,7 +38,7 @@ mod wal;
 pub use page::{Page, PageId, PageKind, PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE, PAGE_SIZE};
 pub use backup::{manifest_path_for, BackupInfo};
 pub use btree::{BTree, MAX_KEY, MAX_VALUE};
-pub use db::{wal_path_for, Db, PageRead, Txn};
+pub use db::{wal_path_for, Db, PageRead, Snapshot, Txn};
 pub use pager::{Pager, FORMAT_VERSION, MAGIC};
 
 use std::fmt;
@@ -61,6 +62,8 @@ pub enum StorageError {
     WalCorrupt(String),
     /// A backup failed verification (altered, truncated, damaged or incompatible).
     BackupInvalid(String),
+    /// The operation needs the main file fully up to date, but a snapshot is still open.
+    ReadersActive,
     /// A key or value exceeds the size limit (or a key is empty).
     TooLarge { what: &'static str, len: usize, max: usize },
     /// The transaction was committed durably, but the follow-up checkpoint failed.
@@ -77,6 +80,7 @@ impl fmt::Display for StorageError {
             StorageError::InvalidPage(p) => write!(f, "page {p} cannot be used for this operation"),
             StorageError::WalCorrupt(s) => write!(f, "write-ahead log is corrupt: {s}"),
             StorageError::BackupInvalid(s) => write!(f, "backup is not valid: {s}"),
+            StorageError::ReadersActive => write!(f, "a snapshot is still open; drop all snapshots first"),
             StorageError::TooLarge { what, len, max } => write!(f, "{what} of {len} bytes is not allowed (limit {max}, minimum 1)"),
             StorageError::PostCommit(e) => write!(f, "transaction is durable but checkpoint failed: {e}"),
         }

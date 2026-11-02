@@ -267,3 +267,28 @@ pub(crate) fn header_image(page_count: u64, free_head: PageId) -> [u8; PAGE_SIZE
     p[OFF_FREE_HEAD..OFF_FREE_HEAD + 8].copy_from_slice(&free_head.to_le_bytes());
     page.encode()
 }
+
+/// Read one page at its position without touching any file cursor, so many threads can read
+/// the same file handle concurrently.
+pub(crate) fn read_at(file: &File, id: u64) -> Result<[u8; PAGE_SIZE]> {
+    let mut buf = [0u8; PAGE_SIZE];
+    let offset = id * PAGE_SIZE as u64;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileExt;
+        file.read_exact_at(&mut buf, offset)?;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileExt;
+        let mut done = 0usize;
+        while done < PAGE_SIZE {
+            let n = file.seek_read(&mut buf[done..], offset + done as u64)?;
+            if n == 0 {
+                return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "short read").into());
+            }
+            done += n;
+        }
+    }
+    Ok(buf)
+}

@@ -110,7 +110,7 @@ fn remove_quietly(p: &Path) {
 
 impl Db {
     /// Write a consistent, verified backup. Refuses to overwrite an existing backup.
-    pub fn backup_to(&mut self, dest: impl AsRef<Path>) -> Result<BackupInfo> {
+    pub fn backup_to(&self, dest: impl AsRef<Path>) -> Result<BackupInfo> {
         let dest = dest.as_ref();
         let manifest = manifest_path_for(dest);
         for p in [dest, manifest.as_path()] {
@@ -121,12 +121,13 @@ impl Db {
                 )));
             }
         }
-        self.checkpoint()?;
-
         let partial = suffixed(dest, ".partial");
         remove_quietly(&partial); // leftover from an earlier interrupted backup
         let mut f = OpenOptions::new().write(true).create_new(true).open(&partial)?;
-        let digest = match self.pager.backup_copy(&mut f) {
+        // Holds the writer lock and requires a fully checkpointed main file (so it fails with
+        // `ReadersActive` while snapshots are open) for the duration of the copy.
+        let copied = self.with_checkpointed(|pager| Ok((pager.backup_copy(&mut f)?, pager.page_count())));
+        let (digest, page_count) = match copied {
             Ok(d) => d,
             Err(e) => {
                 drop(f);
@@ -139,7 +140,7 @@ impl Db {
             drop(f);
             fs::rename(&partial, dest)?;
             let info = BackupInfo {
-                page_count: self.pager.page_count(),
+                page_count,
                 created_unix: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
                 sha256: hex(&digest),
             };

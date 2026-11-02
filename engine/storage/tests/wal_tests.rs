@@ -57,7 +57,7 @@ fn committed_data_survives_a_crash_before_checkpoint() {
         id = commit_page(&mut db, 0xAA);
         // dropped without close(): the main file has never seen this page
     }
-    let mut db = Db::open(&path).unwrap();
+    let db = Db::open(&path).unwrap();
     assert_eq!(fill_of(&db.read(id).unwrap()), 0xAA);
     assert!(db.verify().unwrap().is_empty());
 }
@@ -77,7 +77,7 @@ fn uncommitted_and_rolled_back_work_is_invisible() {
     assert_eq!(db.page_count(), 2);
     assert_eq!(fill_of(&db.read(kept).unwrap()), 1);
     drop(db);
-    let mut db = Db::open(&path).unwrap();
+    let db = Db::open(&path).unwrap();
     assert_eq!(db.page_count(), 2);
     assert_eq!(fill_of(&db.read(kept).unwrap()), 1);
 }
@@ -111,12 +111,12 @@ fn a_torn_final_commit_is_dropped_and_earlier_commits_survive() {
         std::fs::copy(&path, &copy).unwrap();
         std::fs::copy(wal_path_for(&path), wal_path_for(&copy)).unwrap();
         truncate_wal(&copy, cut);
-        let mut db = Db::open(&copy).unwrap();
+        let db = Db::open(&copy).unwrap();
         assert_eq!(fill_of(&db.read(a).unwrap()), 0x11, "cut at {cut}");
         assert!(matches!(db.read(b), Err(StorageError::OutOfRange(_))), "cut at {cut}");
         assert!(db.verify().unwrap().is_empty());
     }
-    let mut db = Db::open(&path).unwrap();
+    let db = Db::open(&path).unwrap();
     assert_eq!(fill_of(&db.read(b).unwrap()), 0x22);
 }
 
@@ -136,7 +136,7 @@ fn trailing_garbage_in_the_log_is_ignored() {
     // the log is usable again afterwards
     let id2 = commit_page(&mut db, 0x44);
     drop(db);
-    let mut db = Db::open(&path).unwrap();
+    let db = Db::open(&path).unwrap();
     assert_eq!(fill_of(&db.read(id2).unwrap()), 0x44);
 }
 
@@ -165,7 +165,7 @@ fn a_damaged_main_file_header_is_repaired_from_the_log() {
     f.seek(SeekFrom::Start(20)).unwrap();
     f.write_all(&[0xFF; 8]).unwrap();
     drop(f);
-    let mut db = Db::open(&path).unwrap();
+    let db = Db::open(&path).unwrap();
     assert_eq!(fill_of(&db.read(id).unwrap()), 0x55);
     assert!(db.verify().unwrap().is_empty());
 }
@@ -184,7 +184,7 @@ fn replaying_a_log_twice_is_harmless() {
     assert_eq!(wal_len(&path), 16);
     // Crash after copying pages but before the log was emptied: the log comes back.
     std::fs::write(wal_path_for(&path), &saved).unwrap();
-    let mut db = Db::open(&path).unwrap();
+    let db = Db::open(&path).unwrap();
     assert_eq!(fill_of(&db.read(a).unwrap()), 7);
     assert_eq!(fill_of(&db.read(b).unwrap()), 8);
     assert_eq!(db.page_count(), 3);
@@ -216,7 +216,7 @@ fn free_list_changes_are_transactional_and_durable() {
         assert_eq!(t.allocate().unwrap(), a);
         drop(t);
     }
-    let mut db = Db::open(&path).unwrap();
+    let db = Db::open(&path).unwrap();
     let mut t = db.begin();
     assert_eq!(t.allocate().unwrap(), a, "freed page is reused after recovery");
     t.write(a, &data_page(9)).unwrap();
@@ -246,7 +246,7 @@ fn automatic_checkpoint_empties_the_log_and_keeps_the_data() {
     // Ten commits of 2 pages each would be > 20 pages of log without checkpoints.
     assert!(db.wal_len() < 10 * 2 * (PAGE_SIZE as u64), "log should have been truncated");
     drop(db);
-    let mut db = Db::open(&path).unwrap();
+    let db = Db::open(&path).unwrap();
     for (i, id) in ids.iter().enumerate() {
         assert_eq!(fill_of(&db.read(*id).unwrap()), i as u8 + 1);
     }

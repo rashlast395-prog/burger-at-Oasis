@@ -38,7 +38,7 @@ fn setup_orders(e: &mut Engine) {
 
 #[test]
 fn insert_get_update_delete_and_duplicate_ids() {
-    let (_d, _p, mut e) = new_engine();
+    let (_d, _p, e) = new_engine();
     let mut t = e.begin();
     t.create_collection("items").unwrap();
     t.insert("items", json!({"_id": "a", "n": 1})).unwrap();
@@ -58,7 +58,7 @@ fn insert_get_update_delete_and_duplicate_ids() {
 
 #[test]
 fn invalid_input_is_rejected() {
-    let (_d, _p, mut e) = new_engine();
+    let (_d, _p, e) = new_engine();
     let mut t = e.begin();
     for bad in ["", "Bad", "has space", &"x".repeat(65)] {
         assert!(matches!(t.create_collection(bad), Err(EngineError::InvalidName(_))), "{bad:?}");
@@ -104,7 +104,7 @@ fn filters_ranges_logic_paths_sort_skip_limit() {
 
 #[test]
 fn malformed_queries_are_rejected_even_on_empty_collections() {
-    let (_d, _p, mut e) = new_engine();
+    let (_d, _p, e) = new_engine();
     let mut t = e.begin();
     t.create_collection("c").unwrap();
     for q in [
@@ -163,7 +163,7 @@ fn indexes_are_used_when_they_can_be_and_never_change_results() {
 
 #[test]
 fn unique_index_blocks_duplicates_without_partial_changes() {
-    let (_d, _p, mut e) = new_engine();
+    let (_d, _p, e) = new_engine();
     let mut t = e.begin();
     t.create_collection("users").unwrap();
     t.create_index("users", "email", true).unwrap();
@@ -184,7 +184,7 @@ fn unique_index_blocks_duplicates_without_partial_changes() {
 
 #[test]
 fn building_a_unique_index_over_existing_duplicates_fails_cleanly() {
-    let (_d, _p, mut e) = new_engine();
+    let (_d, _p, e) = new_engine();
     let mut t = e.begin();
     t.create_collection("c").unwrap();
     t.insert("c", json!({"_id": "a", "k": 1})).unwrap();
@@ -199,7 +199,7 @@ fn building_a_unique_index_over_existing_duplicates_fails_cleanly() {
 
 #[test]
 fn only_scalars_can_be_indexed_and_failed_writes_change_nothing() {
-    let (_d, _p, mut e) = new_engine();
+    let (_d, _p, e) = new_engine();
     let mut t = e.begin();
     t.create_collection("c").unwrap();
     t.create_index("c", "tag", false).unwrap();
@@ -217,7 +217,7 @@ fn only_scalars_can_be_indexed_and_failed_writes_change_nothing() {
 
 #[test]
 fn rollback_and_crash_recovery_keep_documents_and_indexes_in_step() {
-    let (_d, path, mut e) = new_engine();
+    let (_d, path, e) = new_engine();
     let mut t = e.begin();
     t.create_collection("c").unwrap();
     t.create_index("c", "n", false).unwrap();
@@ -235,7 +235,7 @@ fn rollback_and_crash_recovery_keep_documents_and_indexes_in_step() {
     t.insert("c", json!({"_id": "d", "n": 4})).unwrap();
     t.commit().unwrap();
     drop(e.into_db()); // crash: nothing was checkpointed
-    let mut e = Engine::open(&path).unwrap();
+    let e = Engine::open(&path).unwrap();
     assert_eq!(ids(&e.find("c", &json!({"filter": {"n": {"$gte": 0}}})).unwrap()), ["a", "d"]);
     assert!(e.verify("c").unwrap().is_empty());
     assert_eq!(e.explain("c", &json!({"filter": {"n": 4}})).unwrap(), "index scan (equality) on n");
@@ -356,6 +356,8 @@ fn randomized_queries_match_brute_force_with_and_without_indexes() {
             if rng.below(4) != 0 {
                 t.commit().unwrap();
                 model = m;
+            } else {
+                drop(t); // rolled back (also releases the writer lock)
             }
             if rng.below(6) == 0 {
                 drop(e.into_db()); // crash
@@ -379,7 +381,7 @@ fn randomized_queries_match_brute_force_with_and_without_indexes() {
 
 #[test]
 fn documents_larger_than_a_page_work_with_indexes_updates_and_crashes() {
-    let (_d, path, mut e) = new_engine();
+    let (_d, path, e) = new_engine();
     let mut t = e.begin();
     t.create_collection("orders").unwrap();
     t.create_index("orders", "status", false).unwrap();
@@ -396,7 +398,7 @@ fn documents_larger_than_a_page_work_with_indexes_updates_and_crashes() {
     t.delete("orders", "o02").unwrap();
     t.commit().unwrap();
     drop(e.into_db()); // crash
-    let mut e = Engine::open(&path).unwrap();
+    let e = Engine::open(&path).unwrap();
     assert_eq!(e.find("orders", &json!({"filter": {"status": "open"}})).unwrap().len(), 13);
     let doc = e.get("orders", "o01").unwrap().unwrap();
     assert_eq!(doc["lines"].as_array().unwrap().len(), 400);
@@ -429,7 +431,7 @@ fn engine_backup_restore_returns_the_old_state_and_detects_damage() {
 
     let restored_path = dir.path().join("restored.boasis");
     Engine::restore(&backup, &restored_path).unwrap();
-    let mut r = Engine::open(&restored_path).unwrap();
+    let r = Engine::open(&restored_path).unwrap();
     assert_eq!(r.find("orders", &all).unwrap(), before);
     assert_eq!(r.explain("orders", &json!({"filter": {"status": "open"}})).unwrap(), "index scan (equality) on status");
     assert!(r.verify("orders").unwrap().is_empty());
