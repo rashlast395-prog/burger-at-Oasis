@@ -65,6 +65,16 @@ try {
     $r = Run $device @('put', $d, 'nope', (J '{"_id":"x"}'))
     Check ($r.Code -ne 0 -and $r.Out -match 'not a synchronised collection') 'unknown collection is refused'
 
+    Write-Host "orders and stock on the device"
+    $r = Run $device @('order', $d, (J '{"currency":"GHS","items":[{"sku":"burger","name":"Burger","qty":2,"unit_price":4500}]}'))
+    $om = [regex]::Match($r.Out, 'placed order (\S+) total 9000 GHS')
+    Check ($r.Code -eq 0 -and $om.Success) 'place an order (total computed in pesewas)'
+    $oid = $om.Groups[1].Value
+    Check ((Run $device @('status', $d, $oid, 'completed')).Code -ne 0) 'cannot jump from placed to completed'
+    Check ((Run $device @('status', $d, $oid, 'accepted')).Out -match 'is now accepted') 'accept the order'
+    Check ((Run $device @('stock', $d)).Out -match 'burger\s+-2\s+OVERSOLD') 'accepting deducted stock (reported as oversold with none on hand)'
+    Check ((Run $device @('stock', $d, 'burger', '5', 'restock')).Out -match 'burger\s+3') 'restock brings it back above zero'
+
     Write-Host "running server"
     $log = Join-Path $root 'server.out'
     $proc = Start-Process -FilePath $server -ArgumentList @('run', $s) -PassThru -NoNewWindow -RedirectStandardOutput $log -RedirectStandardError (Join-Path $root 'server.err')
@@ -86,7 +96,8 @@ try {
         Write-Host '  SKIPPED  TLS on the wire is intercepted by local security software; the device refused the substituted certificate (that is the pinning working). Sync not verified on this machine.'
         $script:skipped++
     } else {
-        Check ($r.Code -eq 0 -and $r.Out -match 'sent 1 events') 'first sync pushes the queued event'
+        # menu item, order, accept + its sale entry, restock
+        Check ($r.Code -eq 0 -and $r.Out -match 'sent 5 events') 'first sync pushes all queued events'
         Check ((Run $device @('sync', $d)).Out -match 'sent 0 events, received 0') 'second sync has nothing to move'
     }
 }

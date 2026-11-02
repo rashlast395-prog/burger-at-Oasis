@@ -36,7 +36,7 @@ pub mod tls;
 pub use event::{pos, Event, Op, Role};
 use identity::Identity;
 pub use hlc::{new_device_id, new_uuid_v7, valid_device_id, valid_uuid_v7, Clock, Hlc, ManualClock, SystemClock};
-pub use rules::{AppendOnly, Current, Decision, LastWriterWins, Rule, ServerAuthoritative, Versioned};
+pub use rules::{strip_meta, AppendOnly, Current, Decision, LastWriterWins, Rule, ServerAuthoritative, Versioned};
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -85,6 +85,13 @@ impl From<EngineError> for SyncError {
 }
 
 pub type Result<T> = std::result::Result<T, SyncError>;
+
+/// One write in a [`SyncNode::commit`] batch.
+#[derive(Debug, Clone)]
+pub enum Write {
+    Put { collection: String, doc: Value },
+    Delete { collection: String, id: String },
+}
 
 /// A device this node accepts events from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,6 +246,11 @@ impl SyncNode {
         self.role
     }
 
+    /// "Now" according to this node's time source, in Unix milliseconds.
+    pub fn now_ms(&self) -> u64 {
+        self.time.now_ms()
+    }
+
     /// This node's public key (hex), to hand to the other nodes' administrators.
     pub fn public_key(&self) -> String {
         self.identity.public_hex()
@@ -308,12 +320,74 @@ impl SyncNode {
     /// Create or replace a document. Returns the logged event, or `None` if the rule decided
     /// the write changes nothing (for example, re-adding an identical ledger entry).
     pub fn put(&self, collection: &str, doc: Value) -> Result<Option<Event>> {
-        let id = check_doc(&doc)?.to_string();
-        self.commit_local(collection, &id, Op::Upsert { doc })
+        Ok(self.commit(vec![Write::Put { collection: collection.to_string(), doc }])?.remove(0))
     }
 
     pub fn delete(&self, collection: &str, doc_id: &str) -> Result<Option<Event>> {
-        self.commit_local(collection, doc_id, Op::Delete)
+        Ok(self.commit(vec![Write::Delete { collection: collection.to_string(), id: doc_id.to_string() }])?.remove(0))
+    }
+
+    /// Several writes as **one local transaction**: all are logged and applied, or (if any
+    /// is refused) none are. Returns one entry per write, `None` where the rule found
+    /// nothing to change. Later writes see the effect of earlier ones in the same batch.
+    ///
+    /// Atomicity is local only: other nodes receive the resulting events individually and
+    /// may briefly hold some of them but not yet the rest.
+    pub fn commit(&self, writes: Vec<Write>) -> Result<Vec<Option<Event>>> {
+        if writes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut tx = self.engine.begin();
+        let now = self.time.now_ms();
+        let mut clk = *lock(&self.clock);
+        let mut seq = applied_seq(&mut tx, &self.device)?;
+        let mut out = Vec::with_capacity(writes.len());
+        for w in writes {
+            let (collection, doc_id, op) = match w {
+                Write::Put { collection, doc } => {
+                    let id = check_doc(&doc)?.to_string();
+                    (collection, id, Op::Upsert { doc })
+                }
+                Write::Delete { collection, id } => (collection, id, Op::Delete),
+            };
+            let rule = self.rule(&collection)?;
+            let cur = load_current(&mut tx, &collection, &doc_id)?;
+            if matches!(op, Op::Delete) && cur.doc.is_none() {
+                out.push(None);
+                continue;
+            }
+            let hlc = clk.tick(now);
+            let mut ev = Event {
+                event_id: new_uuid_v7(now),
+                device: self.device.clone(),
+                seq: seq + 1,
+                hlc: hlc.encode(&self.device),
+                role: self.role,
+                collection,
+                doc_id,
+                op,
+                sig: None,
+            };
+            // Any refusal returns early; dropping `tx` discards the whole batch.
+            rule.local_check(self.role, &cur, &ev).map_err(SyncError::Rejected)?;
+            match rule.decide(&cur, &ev) {
+                Decision::Apply => {}
+                Decision::Skip(_) => {
+                    out.push(None);
+                    continue;
+                }
+                Decision::Reject(why) => return Err(SyncError::Rejected(why)),
+            }
+            ev.sig = Some(self.identity.sign(&ev.signing_bytes()));
+            apply_op(&mut tx, &ev)?;
+            record_event(&mut tx, &ev)?;
+            seq += 1;
+            out.push(Some(ev));
+        }
+        save_clock(&mut tx, &clk)?;
+        tx.commit().map_err(EngineError::from)?;
+        *lock(&self.clock) = clk;
+        Ok(out)
     }
 
     pub fn get(&self, collection: &str, id: &str) -> Result<Option<Value>> {
@@ -336,43 +410,6 @@ impl SyncNode {
 
     fn rule(&self, collection: &str) -> Result<&dyn Rule> {
         self.rules.get(collection).map(|r| r.as_ref()).ok_or_else(|| SyncError::UnknownCollection(collection.to_string()))
-    }
-
-    fn commit_local(&self, collection: &str, doc_id: &str, op: Op) -> Result<Option<Event>> {
-        let rule = self.rule(collection)?;
-        let mut tx = self.engine.begin();
-        let now = self.time.now_ms();
-        let mut clk = *lock(&self.clock);
-        let hlc = clk.tick(now);
-        let seq = applied_seq(&mut tx, &self.device)? + 1;
-        let mut ev = Event {
-            event_id: new_uuid_v7(now),
-            device: self.device.clone(),
-            seq,
-            hlc: hlc.encode(&self.device),
-            role: self.role,
-            collection: collection.to_string(),
-            doc_id: doc_id.to_string(),
-            op,
-            sig: None,
-        };
-        rule.local_check(self.role, &ev).map_err(SyncError::Rejected)?;
-        let cur = load_current(&mut tx, collection, doc_id)?;
-        if matches!(ev.op, Op::Delete) && cur.doc.is_none() {
-            return Ok(None);
-        }
-        match rule.decide(&cur, &ev) {
-            Decision::Apply => {}
-            Decision::Skip(_) => return Ok(None),
-            Decision::Reject(why) => return Err(SyncError::Rejected(why)),
-        }
-        ev.sig = Some(self.identity.sign(&ev.signing_bytes()));
-        apply_op(&mut tx, &ev)?;
-        record_event(&mut tx, &ev)?;
-        save_clock(&mut tx, &clk)?;
-        tx.commit().map_err(EngineError::from)?;
-        *lock(&self.clock) = clk;
-        Ok(Some(ev))
     }
 
     // ------------------------------------------------------------------ replication

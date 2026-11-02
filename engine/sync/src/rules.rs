@@ -56,7 +56,10 @@ pub trait Rule: Send + Sync {
     fn decide(&self, current: &Current, event: &Event) -> Decision;
 
     /// Extra check applied only to events created on this node, before they are logged.
-    fn local_check(&self, _role: Role, _event: &Event) -> Result<(), String> {
+    /// Unlike `decide`, it may depend on what this node currently holds (`current`), so it
+    /// can enforce transitions such as "an order may only move forward". It must not be
+    /// relied on for convergence: other nodes never run it on this node's events.
+    fn local_check(&self, _role: Role, _current: &Current, _event: &Event) -> Result<(), String> {
         Ok(())
     }
 }
@@ -76,7 +79,7 @@ fn lww(current: &Current, ev: &Event) -> Decision {
 }
 
 /// Document content without the bookkeeping fields the node adds.
-pub(crate) fn strip_meta(doc: &Value) -> Value {
+pub fn strip_meta(doc: &Value) -> Value {
     let mut d = doc.clone();
     if let Value::Object(m) = &mut d {
         m.remove("_hlc");
@@ -136,7 +139,7 @@ impl Rule for ServerAuthoritative {
         }
         lww(current, ev)
     }
-    fn local_check(&self, role: Role, _ev: &Event) -> Result<(), String> {
+    fn local_check(&self, role: Role, _current: &Current, _ev: &Event) -> Result<(), String> {
         if role == Role::Server {
             Ok(())
         } else {

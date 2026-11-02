@@ -25,7 +25,10 @@ const USAGE: &str = "usage:
   bo-device put    <dir> <collection> '<json document with an _id>'
   bo-device get    <dir> <collection> <id>
   bo-device list   <dir> <collection>
-  bo-device delete <dir> <collection> <id>";
+  bo-device delete <dir> <collection> <id>
+  bo-device order  <dir> '<order json: items, currency, optional delivery_fee/discount/notes>'
+  bo-device status <dir> <order id> <accepted|preparing|ready|out_for_delivery|completed|cancelled>
+  bo-device stock  <dir> [<sku> <delta> <restock|waste|adjustment>]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -50,6 +53,27 @@ fn main() -> ExitCode {
         Some("list") => with_node(&pos, |n, _| {
             for d in n.find(pos.get(1).ok_or(USAGE)?, &serde_json::json!({})).map_err(|e| e.to_string())? {
                 println!("{d}");
+            }
+            Ok(())
+        }),
+        Some("order") => with_node(&pos, |n, _| {
+            let doc: serde_json::Value = serde_json::from_str(pos.get(1).ok_or(USAGE)?).map_err(|e| format!("not valid JSON: {e}"))?;
+            let o = bo_domain::place_order(n, doc).map_err(|e| e.to_string())?;
+            println!("placed order {} total {} {}", o["_id"].as_str().unwrap_or(""), o["total"], o["currency"].as_str().unwrap_or(""));
+            Ok(())
+        }),
+        Some("status") => with_node(&pos, |n, _| {
+            let o = bo_domain::set_status(n, pos.get(1).ok_or(USAGE)?, pos.get(2).ok_or(USAGE)?).map_err(|e| e.to_string())?;
+            println!("order {} is now {}", o["_id"].as_str().unwrap_or(""), o["status"].as_str().unwrap_or(""));
+            Ok(())
+        }),
+        Some("stock") => with_node(&pos, |n, _| {
+            if let (Some(sku), Some(delta), Some(reason)) = (pos.get(1), pos.get(2), pos.get(3)) {
+                let delta: i64 = delta.parse().map_err(|_| "delta must be a whole number")?;
+                bo_domain::record_stock(n, sku, delta, reason, None).map_err(|e| e.to_string())?;
+            }
+            for (sku, level) in bo_domain::stock_levels(n).map_err(|e| e.to_string())? {
+                println!("{sku:<24} {level}{}", if level < 0 { "   OVERSOLD" } else { "" });
             }
             Ok(())
         }),

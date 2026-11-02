@@ -153,8 +153,21 @@ fn run(args: &[String]) -> Result<(), String> {
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     ctrlc::set_handler(move || flag.store(true, Ordering::SeqCst)).map_err(|e| e.to_string())?;
+    // Repair stock effects of offline races (for example, an order accepted on one till and
+    // cancelled on another) every 30 seconds. Only meaningful with the standard collections.
+    let reconciles = cfg.collections.get(bo_domain::ORDERS).map(String::as_str) == Some("order")
+        && cfg.collections.get(bo_domain::LEDGER).map(String::as_str) == Some("inventory-ledger");
+    let mut ticks = 0u32;
     while !stop.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(200));
+        ticks += 1;
+        if reconciles && ticks % 150 == 0 {
+            match bo_domain::reconcile(&node) {
+                Ok(0) => {}
+                Ok(n) => println!("reconcile: wrote {n} stock entries"),
+                Err(e) => eprintln!("reconcile failed: {e}"),
+            }
+        }
     }
     println!("shutting down");
     server.stop();

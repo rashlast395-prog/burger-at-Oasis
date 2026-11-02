@@ -39,6 +39,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bo-domain"
+version = "0.1.0"
+dependencies = [
+ "bo-sync",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "bo-engine"
 version = "0.1.0"
 dependencies = [
@@ -52,6 +61,7 @@ dependencies = [
 name = "bo-server"
 version = "0.1.0"
 dependencies = [
+ "bo-domain",
  "bo-sync",
  "ctrlc",
  "serde",

@@ -69,7 +69,10 @@ private keys, and `node.db` (and any backup of it) contains the signing key.
 * `enroll` needs the server stopped (the database is single-process).
 * No backups, metrics or log shipping from the server yet; no rate limiting beyond a
   64-connection cap.
-* Order/inventory/payment business rules are placeholders (`orders` is last-writer-wins).
+* Orders and inventory follow the rules in `engine/domain` (state machine, stock ledger,
+  recipes; the server reconciles stock every 30 s). Payments are still a placeholder.
+* The business defaults (deduct stock at `accepted`, allow overselling, no editing a placed
+  order, cancel outranks in-progress, completed outranks cancel) need the owner's sign-off.
 * Tested on Windows only; the Linux build has not been run.
 
 ## Checking it works

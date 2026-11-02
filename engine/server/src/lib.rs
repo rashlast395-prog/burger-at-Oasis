@@ -10,19 +10,22 @@ use std::path::Path;
 use bo_sync::{AppendOnly, LastWriterWins, Rule, ServerAuthoritative, Versioned};
 use serde::{Deserialize, Serialize};
 
-/// Collections created by `bo-server init` unless the config is edited. `orders` is plain
-/// last-writer-wins for now: the order state machine is a later phase, and until then two
-/// devices editing one order at once will lose one edit.
-pub const DEFAULT_COLLECTIONS: [(&str, &str); 5] = [
+/// Collections created by `bo-server init` unless the config is edited. Orders, the inventory
+/// ledger and recipes use the restaurant rules from `bo-domain`; `orders`,
+/// `inventory_ledger` and `recipes` must keep these names for the order tools to work.
+pub const DEFAULT_COLLECTIONS: [(&str, &str); 6] = [
     ("menu", "versioned"),
-    ("orders", "last-writer-wins"),
+    ("orders", "order"),
     ("customers", "last-writer-wins"),
-    ("inventory_ledger", "append-only"),
+    ("inventory_ledger", "inventory-ledger"),
+    ("recipes", "versioned"),
     ("payments", "server-authoritative"),
 ];
 
 pub fn rule_by_name(name: &str) -> Option<Box<dyn Rule>> {
     match name {
+        "order" => Some(Box::new(bo_domain::OrderRule)),
+        "inventory-ledger" => Some(Box::new(bo_domain::InventoryLedger)),
         "last-writer-wins" => Some(Box::new(LastWriterWins)),
         "append-only" => Some(Box::new(AppendOnly)),
         "server-authoritative" => Some(Box::new(ServerAuthoritative)),
