@@ -37,43 +37,12 @@ impl Pager {
     /// Open an existing database, validating the header and file length.
     pub fn open(path: impl AsRef<Path>) -> Result<Pager> {
         let mut file = OpenOptions::new().read(true).write(true).open(path)?;
-        let len = file.metadata()?.len();
-        if len < PAGE_SIZE as u64 {
-            return Err(StorageError::BadHeader("file is shorter than one page".into()));
-        }
-        let page = read_raw(&mut file, 0)?;
-        let header = Page::decode(0, &page)?;
-        if header.kind() != PageKind::Header {
-            return Err(StorageError::BadHeader("page 0 is not a header page".into()));
-        }
-        let p = header.payload();
-        if p[OFF_MAGIC..OFF_MAGIC + 8] != MAGIC {
-            return Err(StorageError::BadHeader("not a Burger Oasis database (bad magic)".into()));
-        }
-        let version = u32::from_le_bytes(p[OFF_VERSION..OFF_VERSION + 4].try_into().unwrap());
-        if version != FORMAT_VERSION {
-            return Err(StorageError::BadHeader(format!(
-                "unsupported format version {version} (this build supports {FORMAT_VERSION})"
-            )));
-        }
-        let page_size = u32::from_le_bytes(p[OFF_PAGE_SIZE..OFF_PAGE_SIZE + 4].try_into().unwrap());
-        if page_size as usize != PAGE_SIZE {
-            return Err(StorageError::BadHeader(format!("page size {page_size} does not match {PAGE_SIZE}")));
-        }
-        let page_count = u64::from_le_bytes(p[OFF_PAGE_COUNT..OFF_PAGE_COUNT + 8].try_into().unwrap());
-        let free_head = u64::from_le_bytes(p[OFF_FREE_HEAD..OFF_FREE_HEAD + 8].try_into().unwrap());
-        // A file longer than page_count pages is fine (an interrupted extension leaves a tail);
-        // a file shorter than the header claims means data is missing.
-        if len < page_count.saturating_mul(PAGE_SIZE as u64) {
-            return Err(StorageError::BadHeader(format!(
-                "file is truncated: header says {page_count} pages but file holds {}",
-                len / PAGE_SIZE as u64
-            )));
-        }
-        if page_count == 0 || (free_head != 0 && free_head >= page_count) {
-            return Err(StorageError::BadHeader("header contains impossible values".into()));
-        }
+        let (page_count, free_head) = load_header(&mut file)?;
         Ok(Pager { file, page_count, free_head })
+    }
+
+    pub(crate) fn free_head(&self) -> PageId {
+        self.free_head
     }
 
     /// Total pages including the header page.
@@ -201,26 +170,86 @@ impl Pager {
     }
 
     fn write_header(&mut self) -> Result<()> {
-        let mut page = Page::new(PageKind::Header);
-        let p = page.payload_mut();
-        p[OFF_MAGIC..OFF_MAGIC + 8].copy_from_slice(&MAGIC);
-        p[OFF_VERSION..OFF_VERSION + 4].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
-        p[OFF_PAGE_SIZE..OFF_PAGE_SIZE + 4].copy_from_slice(&(PAGE_SIZE as u32).to_le_bytes());
-        p[OFF_PAGE_COUNT..OFF_PAGE_COUNT + 8].copy_from_slice(&self.page_count.to_le_bytes());
-        p[OFF_FREE_HEAD..OFF_FREE_HEAD + 8].copy_from_slice(&self.free_head.to_le_bytes());
-        write_raw(&mut self.file, 0, &page.encode())
+        write_raw(&mut self.file, 0, &header_image(self.page_count, self.free_head))
+    }
+
+    /// Write an already-encoded page image at any position, extending the file if needed.
+    /// Used only by the WAL layer, which has validated the image.
+    pub(crate) fn raw_write(&mut self, id: PageId, image: &[u8; PAGE_SIZE]) -> Result<()> {
+        write_raw(&mut self.file, id, image)
+    }
+
+    /// Re-read page count and free list head after the WAL layer rewrote page 0.
+    pub(crate) fn refresh_header(&mut self) -> Result<()> {
+        let (page_count, free_head) = load_header(&mut self.file)?;
+        self.page_count = page_count;
+        self.free_head = free_head;
+        Ok(())
     }
 }
 
-fn read_raw(file: &mut File, id: u64) -> Result<[u8; PAGE_SIZE]> {
+pub(crate) fn read_raw(file: &mut File, id: u64) -> Result<[u8; PAGE_SIZE]> {
     let mut buf = [0u8; PAGE_SIZE];
     file.seek(SeekFrom::Start(id * PAGE_SIZE as u64))?;
     file.read_exact(&mut buf)?;
     Ok(buf)
 }
 
-fn write_raw(file: &mut File, id: u64, buf: &[u8; PAGE_SIZE]) -> Result<()> {
+pub(crate) fn write_raw(file: &mut File, id: u64, buf: &[u8; PAGE_SIZE]) -> Result<()> {
     file.seek(SeekFrom::Start(id * PAGE_SIZE as u64))?;
     file.write_all(buf)?;
     Ok(())
+}
+
+/// Parse and validate the header page and file length of an open database file.
+pub(crate) fn load_header(file: &mut File) -> Result<(u64, u64)> {
+    let len = file.metadata()?.len();
+    if len < PAGE_SIZE as u64 {
+        return Err(StorageError::BadHeader("file is shorter than one page".into()));
+    }
+        let page = read_raw(file, 0)?;
+        let header = Page::decode(0, &page)?;
+        if header.kind() != PageKind::Header {
+            return Err(StorageError::BadHeader("page 0 is not a header page".into()));
+        }
+        let p = header.payload();
+        if p[OFF_MAGIC..OFF_MAGIC + 8] != MAGIC {
+            return Err(StorageError::BadHeader("not a Burger Oasis database (bad magic)".into()));
+        }
+        let version = u32::from_le_bytes(p[OFF_VERSION..OFF_VERSION + 4].try_into().unwrap());
+        if version != FORMAT_VERSION {
+            return Err(StorageError::BadHeader(format!(
+                "unsupported format version {version} (this build supports {FORMAT_VERSION})"
+            )));
+        }
+        let page_size = u32::from_le_bytes(p[OFF_PAGE_SIZE..OFF_PAGE_SIZE + 4].try_into().unwrap());
+        if page_size as usize != PAGE_SIZE {
+            return Err(StorageError::BadHeader(format!("page size {page_size} does not match {PAGE_SIZE}")));
+        }
+        let page_count = u64::from_le_bytes(p[OFF_PAGE_COUNT..OFF_PAGE_COUNT + 8].try_into().unwrap());
+        let free_head = u64::from_le_bytes(p[OFF_FREE_HEAD..OFF_FREE_HEAD + 8].try_into().unwrap());
+        // A file longer than page_count pages is fine (an interrupted extension leaves a tail);
+        // a file shorter than the header claims means data is missing.
+        if len < page_count.saturating_mul(PAGE_SIZE as u64) {
+            return Err(StorageError::BadHeader(format!(
+                "file is truncated: header says {page_count} pages but file holds {}",
+                len / PAGE_SIZE as u64
+            )));
+        }
+        if page_count == 0 || (free_head != 0 && free_head >= page_count) {
+            return Err(StorageError::BadHeader("header contains impossible values".into()));
+        }
+    Ok((page_count, free_head))
+}
+
+/// The encoded bytes of the header page for the given state.
+pub(crate) fn header_image(page_count: u64, free_head: PageId) -> [u8; PAGE_SIZE] {
+    let mut page = Page::new(PageKind::Header);
+    let p = page.payload_mut();
+    p[OFF_MAGIC..OFF_MAGIC + 8].copy_from_slice(&MAGIC);
+    p[OFF_VERSION..OFF_VERSION + 4].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
+    p[OFF_PAGE_SIZE..OFF_PAGE_SIZE + 4].copy_from_slice(&(PAGE_SIZE as u32).to_le_bytes());
+    p[OFF_PAGE_COUNT..OFF_PAGE_COUNT + 8].copy_from_slice(&page_count.to_le_bytes());
+    p[OFF_FREE_HEAD..OFF_FREE_HEAD + 8].copy_from_slice(&free_head.to_le_bytes());
+    page.encode()
 }

@@ -7,11 +7,17 @@
 //! * Page 0 is the file header (magic, format version, page size, page count, free-list head).
 //! * Freed pages are reused through a free list.
 //!
-//! ## What this layer does NOT guarantee (yet)
-//! * **Crash-atomic multi-page updates.** A crash between two page writes can leave the
-//!   file in a state that checksums will *detect* but this layer cannot *repair*.
-//!   Atomicity and durability across pages come from the write-ahead log (next phase).
-//!   Until the WAL exists this crate must not be used for real business data.
+//! * [`Db`] adds transactions: a commit is acknowledged only after its page images and a
+//!   commit record are in the write-ahead log **and fsynced**. After a crash, [`Db::open`]
+//!   replays committed transactions and discards unfinished ones. [`Pager`] on its own is
+//!   still not crash-atomic; use [`Db`].
+//!
+//! ## Known limits
+//! * Single writer; no concurrent readers yet. Whole-page redo log (no undo, no logical records).
+//! * A damaged *final* WAL record is indistinguishable from a torn write and is dropped;
+//!   damage earlier in the log refuses to open.
+//! * Not yet crash-tested against real power loss, only against simulated file damage.
+//! * Not yet reviewed for real business data.
 //!
 //! ## On-disk page layout
 //! ```text
@@ -21,10 +27,13 @@
 //! bytes 8..     payload
 //! ```
 
+mod db;
 mod page;
 mod pager;
+mod wal;
 
 pub use page::{Page, PageId, PageKind, PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE, PAGE_SIZE};
+pub use db::{wal_path_for, Db, Txn};
 pub use pager::{Pager, FORMAT_VERSION, MAGIC};
 
 use std::fmt;
@@ -43,6 +52,11 @@ pub enum StorageError {
     OutOfRange(PageId),
     /// Attempt to use a reserved or invalid page (e.g. writing page 0 as data).
     InvalidPage(PageId),
+    /// The write-ahead log is damaged in a way that is not a torn final write. Opening is
+    /// refused: guessing would risk silently dropping acknowledged transactions.
+    WalCorrupt(String),
+    /// The transaction was committed durably, but the follow-up checkpoint failed.
+    PostCommit(Box<StorageError>),
 }
 
 impl fmt::Display for StorageError {
@@ -53,6 +67,8 @@ impl fmt::Display for StorageError {
             StorageError::BadHeader(s) => write!(f, "invalid database header: {s}"),
             StorageError::OutOfRange(p) => write!(f, "page {p} is out of range"),
             StorageError::InvalidPage(p) => write!(f, "page {p} cannot be used for this operation"),
+            StorageError::WalCorrupt(s) => write!(f, "write-ahead log is corrupt: {s}"),
+            StorageError::PostCommit(e) => write!(f, "transaction is durable but checkpoint failed: {e}"),
         }
     }
 }
