@@ -142,6 +142,23 @@ impl Db {
     }
 }
 
+/// Anything pages can be read from: a [`Db`] (last committed state) or a [`Txn`] (its own view).
+pub trait PageRead {
+    fn read_page(&mut self, id: PageId) -> Result<Page>;
+}
+
+impl PageRead for Db {
+    fn read_page(&mut self, id: PageId) -> Result<Page> {
+        self.read(id)
+    }
+}
+
+impl PageRead for Txn<'_> {
+    fn read_page(&mut self, id: PageId) -> Result<Page> {
+        self.read(id)
+    }
+}
+
 pub struct Txn<'a> {
     db: &'a mut Db,
     dirty: BTreeMap<PageId, Image>,
