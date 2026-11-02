@@ -20,6 +20,7 @@ bo-domain = { path = "../domain" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ctrlc = { version = "3", features = ["termination"] }
+tiny_http = "0.12"
 
 [dev-dependencies]
 tempfile = { workspace = true }

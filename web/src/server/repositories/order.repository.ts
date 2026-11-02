@@ -1,7 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/server/db";
 import type { CreatedOrder, NewOrderData, OrderRepository } from "@/modules/orders/order.service";
-import type { CatalogueProduct, DeliveryConfig, PromoRule } from "@/modules/orders/pricing";
+import type { CatalogueProduct, PromoRule } from "@/modules/orders/pricing";
+import { deliveryConfigFromEnv } from "@/server/delivery";
 
 const toCreated = (o: { id: string; reference: string; status: string; paymentStatus: string; total: number }): CreatedOrder => ({
   id: o.id,
@@ -11,11 +12,6 @@ const toCreated = (o: { id: string; reference: string; status: string; paymentSt
   total: o.total,
 });
 
-const DELIVERY: DeliveryConfig = {
-  freeOver: Number(process.env.DELIVERY_FREE_OVER_MINOR ?? 3000),
-  fee: Number(process.env.DELIVERY_FEE_MINOR ?? 499),
-};
-
 export const prismaOrderRepository: OrderRepository = {
   async defaultBranchId() {
     const branch = await db.branch.findFirst({ where: { active: true }, orderBy: { createdAt: "asc" } });
@@ -24,7 +20,7 @@ export const prismaOrderRepository: OrderRepository = {
   },
 
   async deliveryConfig() {
-    return DELIVERY;
+    return deliveryConfigFromEnv();
   },
 
   async loadCatalogue(productIds) {

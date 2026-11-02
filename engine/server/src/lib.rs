@@ -2,6 +2,8 @@
 //! collections exist and how conflicts are resolved), the file a device is provisioned with,
 //! and small helpers for key files and command-line flags.
 
+pub mod api;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
@@ -13,8 +15,9 @@ use serde::{Deserialize, Serialize};
 /// Collections created by `bo-server init` unless the config is edited. Orders, the inventory
 /// ledger and recipes use the restaurant rules from `bo-domain`; `orders`,
 /// `inventory_ledger` and `recipes` must keep these names for the order tools to work.
-pub const DEFAULT_COLLECTIONS: [(&str, &str); 6] = [
+pub const DEFAULT_COLLECTIONS: [(&str, &str); 7] = [
     ("menu", "versioned"),
+    ("promos", "server-authoritative"),
     ("orders", "order"),
     ("customers", "last-writer-wins"),
     ("inventory_ledger", "inventory-ledger"),

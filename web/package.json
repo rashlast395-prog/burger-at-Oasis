@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "engine:seed": "tsx scripts/engine-seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

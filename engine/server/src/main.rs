@@ -3,7 +3,7 @@
 //!   bo-server init   <dir> --host <name-or-ip> [--host ...] [--listen 0.0.0.0:7443]
 //!   bo-server show   <dir>
 //!   bo-server enroll <dir> --device <id> --public <hex>
-//!   bo-server run    <dir>
+//!   bo-server run    <dir> [--api 127.0.0.1:7480]
 //!
 //! `enroll` and `show` open the database, so run them while the server is stopped (a second
 //! open is refused by the database lock rather than risking corruption).
@@ -24,7 +24,7 @@ const USAGE: &str = "usage:
   bo-server init   <dir> --host <name-or-ip> [--host ...] [--listen 0.0.0.0:7443]
   bo-server show   <dir>
   bo-server enroll <dir> --device <id> --public <hex>
-  bo-server run    <dir>";
+  bo-server run    <dir> [--api 127.0.0.1:7480]   (website API; needs BO_API_TOKEN)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -149,6 +149,17 @@ fn run(args: &[String]) -> Result<(), String> {
     let node = Arc::new(node);
     let server = Server::start_tls(node.clone(), &cfg.listen, tls).map_err(|e| e.to_string())?;
     println!("bo-server {} listening on {} (TLS 1.3, {} devices enrolled)", node.device_id(), server.addr(), node.trusted_devices().len() - 1);
+    // Optional local API for the website on the same machine. The token comes from the
+    // environment, never from the command line (which other users can see) or a file in git.
+    let _api = match flag(args, "--api") {
+        Some(bind) => {
+            let token = std::env::var("BO_API_TOKEN").unwrap_or_default();
+            let api = bo_server::api::Api::start(node.clone(), &bind, token)?;
+            println!("website API on http://{} (loopback only, bearer token from BO_API_TOKEN)", api.addr());
+            Some(api)
+        }
+        None => None,
+    };
 
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
