@@ -28,9 +28,12 @@
 
 mod event;
 mod hlc;
+pub mod identity;
+pub mod net;
 mod rules;
 
 pub use event::{pos, Event, Op, Role};
+use identity::Identity;
 pub use hlc::{new_device_id, new_uuid_v7, valid_device_id, valid_uuid_v7, Clock, Hlc, ManualClock, SystemClock};
 pub use rules::{AppendOnly, Current, Decision, LastWriterWins, Rule, ServerAuthoritative, Versioned};
 
@@ -82,9 +85,21 @@ impl From<EngineError> for SyncError {
 
 pub type Result<T> = std::result::Result<T, SyncError>;
 
+/// A device this node accepts events from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Trusted {
+    pub public: String,
+    pub role: Role,
+}
+
 /// What `apply_remote` did with a batch.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ApplyReport {
+    /// Events whose signature did not verify. Ignored without consuming the device's
+    /// sequence number, so a forger cannot burn another device's numbers.
+    pub unauthenticated: usize,
+    /// Events from a device that is not enrolled here (only when signatures are required).
+    pub unknown_device: usize,
     /// Events that changed a document.
     pub applied: usize,
     /// Valid events that changed nothing because a newer or equal state already existed.
@@ -131,6 +146,9 @@ pub struct SyncNode {
     clock: Mutex<Hlc>,
     time: Arc<dyn Clock>,
     max_drift_ms: u64,
+    identity: Identity,
+    trust: Mutex<BTreeMap<String, Trusted>>,
+    require_sigs: std::sync::atomic::AtomicBool,
 }
 
 impl SyncNode {
@@ -157,6 +175,9 @@ impl SyncNode {
         }
         tx.insert("_meta", json!({"_id": "node", "device": device, "role": role, "rules": names}))?;
         tx.insert("_meta", json!({"_id": "clock", "wall": 0, "counter": 0}))?;
+        let identity = Identity::generate();
+        tx.insert("_meta", json!({"_id": "identity", "secret": identity.secret_hex(), "public": identity.public_hex()}))?;
+        tx.insert("_meta", json!({"_id": "trust", "devices": {device.clone(): {"public": identity.public_hex(), "role": role}}}))?;
         tx.commit()?;
         SyncNode::finish(engine, device, role, rules, time)
     }
@@ -186,7 +207,19 @@ impl SyncNode {
         let persisted = Hlc { wall: c["wall"].as_u64().unwrap_or(0), counter: c["counter"].as_u64().unwrap_or(0) as u32 };
         // Never behind what this device already stamped, even if the OS clock was set back.
         let clock = persisted.max(Hlc { wall: time.now_ms(), counter: 0 });
+        let ident = engine.get("_meta", "identity")?.ok_or(SyncError::NotASyncDatabase)?;
+        let identity = ident["secret"].as_str().and_then(Identity::from_secret_hex).ok_or(SyncError::NotASyncDatabase)?;
+        let trust_doc = engine.get("_meta", "trust")?.ok_or(SyncError::NotASyncDatabase)?;
+        let mut trust = BTreeMap::new();
+        for (id, v) in trust_doc["devices"].as_object().ok_or(SyncError::NotASyncDatabase)? {
+            let role: Role = serde_json::from_value(v["role"].clone()).map_err(|_| SyncError::NotASyncDatabase)?;
+            let public = v["public"].as_str().ok_or(SyncError::NotASyncDatabase)?.to_string();
+            trust.insert(id.clone(), Trusted { public, role });
+        }
         Ok(SyncNode {
+            identity,
+            trust: Mutex::new(trust),
+            require_sigs: std::sync::atomic::AtomicBool::new(false),
             engine,
             device,
             role,
@@ -203,6 +236,60 @@ impl SyncNode {
 
     pub fn role(&self) -> Role {
         self.role
+    }
+
+    /// This node's public key (hex), to hand to the other nodes' administrators.
+    pub fn public_key(&self) -> String {
+        self.identity.public_hex()
+    }
+
+    pub fn sign(&self, msg: &[u8]) -> String {
+        self.identity.sign(msg)
+    }
+
+    /// Enrol a device: from now on its events are accepted (when signatures are required)
+    /// only if signed by `public`, and only with `role`. Enrolling the same device twice
+    /// with the same key is a no-op; changing its key or role is refused (re-keying will
+    /// need an explicit, audited revoke step in a later phase).
+    pub fn trust_device(&self, device: &str, public: &str, role: Role) -> Result<()> {
+        if !valid_device_id(device) || !identity::valid_public(public) {
+            return Err(SyncError::InvalidDocument("bad device id or public key".into()));
+        }
+        let mut guard = lock(&self.trust);
+        match guard.get(device) {
+            Some(t) if t.public == public && t.role == role => return Ok(()),
+            Some(_) => return Err(SyncError::Rejected("device is already enrolled with a different key or role".into())),
+            None => {}
+        }
+        let mut next = guard.clone();
+        next.insert(device.to_string(), Trusted { public: public.to_string(), role });
+        let devices: Map<String, Value> = next.iter().map(|(id, t)| (id.clone(), json!({"public": t.public, "role": t.role}))).collect();
+        let mut tx = self.engine.begin();
+        tx.upsert("_meta", json!({"_id": "trust", "devices": devices}))?;
+        tx.commit().map_err(EngineError::from)?;
+        *guard = next;
+        Ok(())
+    }
+
+    pub fn trusted(&self, device: &str) -> Option<Trusted> {
+        lock(&self.trust).get(device).cloned()
+    }
+
+    /// Require a valid signature from an enrolled device on every remote event. Off by
+    /// default so in-process tests can build events by hand; the network layer refuses to
+    /// run unless it is on.
+    pub fn require_signatures(&self, on: bool) {
+        self.require_sigs.store(on, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn signatures_required(&self) -> bool {
+        self.require_sigs.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// If `device` is enrolled and `sig` is its valid signature over `msg`, its role.
+    pub fn verify_from(&self, device: &str, msg: &[u8], sig: &str) -> Option<Role> {
+        let t = self.trusted(device)?;
+        identity::verify(&t.public, msg, sig).then_some(t.role)
     }
 
     /// The underlying engine, for read access (queries, backups, verification).
@@ -252,7 +339,7 @@ impl SyncNode {
         let mut clk = *lock(&self.clock);
         let hlc = clk.tick(now);
         let seq = applied_seq(&mut tx, &self.device)? + 1;
-        let ev = Event {
+        let mut ev = Event {
             event_id: new_uuid_v7(now),
             device: self.device.clone(),
             seq,
@@ -261,6 +348,7 @@ impl SyncNode {
             collection: collection.to_string(),
             doc_id: doc_id.to_string(),
             op,
+            sig: None,
         };
         rule.local_check(self.role, &ev).map_err(SyncError::Rejected)?;
         let cur = load_current(&mut tx, collection, doc_id)?;
@@ -272,6 +360,7 @@ impl SyncNode {
             Decision::Skip(_) => return Ok(None),
             Decision::Reject(why) => return Err(SyncError::Rejected(why)),
         }
+        ev.sig = Some(self.identity.sign(&ev.signing_bytes()));
         apply_op(&mut tx, &ev)?;
         record_event(&mut tx, &ev)?;
         save_clock(&mut tx, &clk)?;
@@ -320,6 +409,8 @@ impl SyncNode {
         let now = self.time.now_ms();
         let mut clk = *lock(&self.clock);
         let mut rep = ApplyReport::default();
+        let require = self.signatures_required();
+        let trust = lock(&self.trust).clone();
         for ev in events {
             let Some((stamp, stamp_dev)) = Hlc::decode(&ev.hlc) else {
                 // We can still identify (device, seq) if those are sane: dead-letter it.
@@ -340,11 +431,28 @@ impl SyncNode {
                 rep.deferred += 1;
                 continue;
             }
+            let mut auth_problem = None;
+            if require {
+                let Some(t) = trust.get(&ev.device) else {
+                    rep.unknown_device += 1;
+                    continue;
+                };
+                let signed = ev.sig.as_deref().map_or(false, |s| identity::verify(&t.public, &ev.signing_bytes(), s));
+                if !signed {
+                    // Not dead-lettered into the stream: that would let a forger consume
+                    // the real device's sequence numbers.
+                    rep.unauthenticated += 1;
+                    continue;
+                }
+                if t.role != ev.role {
+                    auth_problem = Some(format!("event claims role {:?} but the device is enrolled as {:?}", ev.role, t.role));
+                }
+            }
             let Some(rule) = self.rules.get(&ev.collection) else {
                 rep.blocked = Some(format!("event {} is for unknown collection '{}'", ev.event_id, ev.collection));
                 break;
             };
-            match content_problem(ev) {
+            match auth_problem.or_else(|| content_problem(ev)) {
                 Some(why) => {
                     dead_letter(&mut tx, ev, &why)?;
                     rep.rejected += 1;

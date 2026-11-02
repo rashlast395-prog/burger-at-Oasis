@@ -251,6 +251,7 @@ fn append_only_is_idempotent_and_dead_letters_forged_delete() {
         collection: "ledger".into(),
         doc_id: "e1".into(),
         op: Op::Delete,
+        sig: None,
     };
     let rep = s.apply_remote(&[forged]).unwrap();
     assert_eq!(rep.rejected, 1);
@@ -292,6 +293,7 @@ fn server_authoritative_rejects_device_writes() {
         collection: "payments".into(),
         doc_id: "p2".into(),
         op: Op::Upsert { doc: json!({"_id": "p2", "status": "paid"}) },
+        sig: None,
     };
     let rep = s.apply_remote(&[forged]).unwrap();
     assert_eq!(rep.rejected, 1);
