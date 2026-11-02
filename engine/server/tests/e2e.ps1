@@ -133,3 +133,6 @@ Write-Host ""
 if ($script:failed -gt 0) { Write-Host "$($script:failed) check(s) FAILED"; exit 1 }
 if ($script:skipped -gt 0) { Write-Host "all checks passed; $($script:skipped) skipped (see above)"; exit 0 }
 Write-Host "all checks passed"
+# Explicit: otherwise PowerShell 7 exits with the code of the last program run (the
+# deliberately failing unreachable-server sync above).
+exit 0
