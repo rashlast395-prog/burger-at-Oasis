@@ -524,7 +524,7 @@
         var w = window.open('', '_blank', 'width=520,height=720');
         if (!w) { toast('Allow pop-ups to print the receipt.', 'warn'); return; }
         w.document.write('<!doctype html><title>Receipt ' + esc(o.id) + '</title><body style="font-family:Arial,sans-serif;max-width:420px;margin:24px auto;color:#222">' +
-            '<h2 style="margin:0">Richy\'s Eat</h2><p style="margin:2px 0 14px;color:#666">42 Flavor Street, NY &middot; 0531629095</p>' +
+            '<h2 style="margin:0">Burger Oasis</h2><p style="margin:2px 0 14px;color:#666">42 Flavor Street, NY &middot; 0531629095</p>' +
             '<p><strong>Order #' + esc(o.id) + '</strong><br>' + esc(o.date) + '<br>Payment: ' + esc(o.method) + '</p>' +
             (o.address ? '<p>Deliver to:<br>' + esc(o.address) + '</p>' : '') +
             '<table style="width:100%;border-collapse:collapse" cellpadding="6">' + rows +
@@ -769,7 +769,7 @@
     function nextOrderId() {
         var n = store.get('rz_ordseq', 1041) + 1;
         store.set('rz_ordseq', n);
-        return 'SB-' + n;
+        return 'BO-' + n;
     }
 
     /* replace main.js pay handler with a validated one */
@@ -813,7 +813,7 @@
             payBtn.disabled = false; payBtn.innerHTML = orig;
             closeCheckout();
             openTracking(method);
-            q('#tmId').textContent = order.id.replace('SB-', '');
+            q('#tmId').textContent = order.id.replace('BO-', '');
             cartItems = []; appliedPromo = null;
             updateCartUI();
             cartOpen = false; cartSide.classList.remove('open'); csCvr.classList.remove('show');

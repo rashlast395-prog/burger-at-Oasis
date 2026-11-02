@@ -653,7 +653,7 @@ function sendToFormspree(btn, defaultHtml, buildData, onDone) {
 document.getElementById('resBtn').addEventListener('click', function() {
     var btn = this;
     var fd = new FormData();
-    fd.append('_subject', 'New Table Reservation - Richy\'s Eat');
+    fd.append('_subject', 'New Table Reservation - Burger Oasis');
     fd.append('form_type', 'Reservation');
     fd.append('name', (document.getElementById('resName') || {}).value || '');
     fd.append('email', (document.getElementById('resEmail') || {}).value || '');
@@ -672,7 +672,7 @@ document.getElementById('resBtn').addEventListener('click', function() {
 document.getElementById('ctcBtn').addEventListener('click', function() {
     var btn = this;
     var fd = new FormData();
-    fd.append('_subject', 'New Contact Message - Richy\'s Eat');
+    fd.append('_subject', 'New Contact Message - Burger Oasis');
     fd.append('form_type', 'Contact');
     fd.append('name', (document.getElementById('ctcName') || {}).value || '');
     fd.append('email', (document.getElementById('ctcEmail') || {}).value || '');
@@ -1400,7 +1400,7 @@ function lcOpenNow() {
 
 var LC_INTENTS = [
     { keys: ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening'], exact: true,
-      reply: function() { return 'Hello! 👋 Welcome to Richy\'s Eat. I can help with our menu, delivery, payments, promo codes, opening hours and reservations. What would you like to know?'; } },
+      reply: function() { return 'Hello! 👋 Welcome to Burger Oasis. I can help with our menu, delivery, payments, promo codes, opening hours and reservations. What would you like to know?'; } },
     { keys: ['thank', 'thanks', 'cheers'],
       reply: function() { return 'You\'re welcome! Enjoy your meal. 🍔 Anything else I can help with?'; } },
     { keys: ['bye', 'goodbye', 'see you'],
@@ -1517,7 +1517,7 @@ if (lcToggle) {
         if (lcBox.style.display === 'none') {
             lcBox.style.display = 'block';
             if (lcMessages.children.length === 0) {
-                addChatMsg('<strong>Support:</strong> Hi! 👋 Welcome to Richy\'s Eat. How can I help you today?', 'bot');
+                addChatMsg('<strong>Support:</strong> Hi! 👋 Welcome to Burger Oasis. How can I help you today?', 'bot');
                 lcQuickReplies();
             }
             lcInput.focus();
@@ -1554,7 +1554,7 @@ var ohList = document.getElementById('ohList');
 
 function saveOrder(items, total, method) {
     var orders = JSON.parse(localStorage.getItem('yussif_orders') || '[]');
-    var orderId = 'SB-' + Math.floor(1000 + Math.random() * 9000);
+    var orderId = 'BO-' + Math.floor(1000 + Math.random() * 9000);
     var statuses = ['Order Received', 'Preparing', 'Out for Delivery', 'Delivered'];
     var statusIdx = 0;
     var order = {
@@ -1731,10 +1731,7 @@ function triggerSocialProof() {
     var msg = socialProofMessages[Math.floor(Math.random() * socialProofMessages.length)];
     showToast(msg.text, 'social');
 }
-setTimeout(function() {
-    triggerSocialProof();
-    setInterval(triggerSocialProof, 45000 + Math.random() * 30000);
-}, 12000);
+/* fake social-proof popups removed: they displayed invented activity */
 
 /* ============================================================
    ADVANCED SORTING
