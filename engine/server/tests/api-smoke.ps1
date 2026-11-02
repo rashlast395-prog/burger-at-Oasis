@@ -85,7 +85,12 @@ try {
     Check ($r.Code -eq 200 -and $r.Body.order.status -eq 'accepted') 'accept the order'
     $r = Call GET "/orders/$id"
     Check ($r.Body.order.status -eq 'accepted' -and $r.Body.payment.status -eq 'unpaid') 'order with payment summary'
-    Check ((Call GET '/orders?status=accepted').Body.orders.Count -eq 1) 'list orders by status'
+    $r = Call GET '/orders?status=accepted'
+    Check ($r.Body.orders.Count -eq 1 -and $r.Body.orders[0].payment.status -eq 'unpaid') 'list orders by status, with payment status'
+    Check ((Call POST "/orders/$id/payments" @{ method = 'card'; amount = 3098 }).Code -eq 422) 'card payments cannot be recorded by the website'
+    Check ((Call POST "/orders/$id/payments" @{ method = 'cash'; amount = 0 }).Code -eq 422) 'zero cash refused'
+    $r = Call POST "/orders/$id/payments" @{ method = 'cash'; amount = 3098 }
+    Check ($r.Code -eq 200 -and $r.Body.payment.status -eq 'paid') 'record cash for the full total'
     Check ((Call GET '/nope').Code -eq 404) 'unknown endpoint: 404'
 }
 catch {

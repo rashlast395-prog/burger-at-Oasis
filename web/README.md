@@ -14,6 +14,8 @@ The live storefront (`../Burger/sarab`, static HTML) is unchanged and still what
 | API: `GET /api/menu`, `POST /api/orders/quote`, `POST /api/orders` | Run end to end against the **engine store** on a laptop. Not yet run against PostgreSQL |
 | Seed scripts (`prisma/seed.ts`, `scripts/engine-seed.ts`) | Engine seed run; Prisma seed not yet run. Shared placeholder menu in `prisma/menu-data.ts` |
 | Order store selection (`src/server/repositories/index.ts`) | `ORDER_STORE=prisma` (default) or `engine` |
+| Storefront (`/`): menu, sizes/extras, cart, server-priced totals, promo codes, checkout | Done, tested in the browser. Cash on delivery/collection only |
+| Staff order board (`/staff`): sign-in, live orders, status changes, record cash | Done, tested in the browser. **Engine store only** for now |
 | Auth, payments (Paystack), admin, POS, kitchen, inventory deduction, notifications | Not started |
 
 ## Key decisions
@@ -66,6 +68,17 @@ production unless `ALLOW_EXPERIMENTAL_ENGINE=yes` is set deliberately.
    npm run engine:seed   # reads BO_API_TOKEN / BO_ENGINE_URL from the environment
    npm run dev
    ```
+
+4. Staff board at `/staff`. Add to `web/.env.local`:
+
+   ```
+   STAFF_PASSWORD=<12+ characters; share only with staff>
+   STAFF_SESSION_SECRET=<64 random hex characters>
+   ```
+
+   One shared password for now (per-person accounts come with the auth stage). Sessions are
+   signed, HttpOnly, SameSite=Strict cookies lasting 12 hours; five wrong passwords lock
+   sign-in for 15 minutes.
 
 The engine API only listens on 127.0.0.1 and needs the token. It enforces idempotency and promo
 limits atomically and re-checks every total the site calculates. Order statuses map as

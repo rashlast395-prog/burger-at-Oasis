@@ -23,6 +23,7 @@
 //! | GET    | /v1/orders/by-key/{key}      | the order for an idempotency key         |
 //! | GET    | /v1/orders/{id}              | one order with its payment summary       |
 //! | POST   | /v1/orders/{id}/status       | `{"status": "accepted"}` etc.            |
+//! | POST   | /v1/orders/{id}/payments     | `{"method": "cash", "amount": 4498}`     |
 
 use std::io::Read;
 use std::net::SocketAddr;
@@ -221,8 +222,34 @@ fn route(st: &State, req: &mut Request) -> Reply {
                 Some(s) => json!({"filter": {"status": s}}),
                 None => json!({}),
             };
-            n.find(ORDERS, &q).map(|os| ok(json!({"orders": os.iter().map(clean).collect::<Vec<_>>()}))).unwrap_or_else(from_sync)
+            match n.find(ORDERS, &q) {
+                Ok(os) => {
+                    let mut out = Vec::with_capacity(os.len());
+                    for o in &os {
+                        let mut o = clean(o);
+                        let id = o["_id"].as_str().unwrap_or_default().to_string();
+                        match bo_domain::payment_summary(n, &id) {
+                            Ok(s) => o["payment"] = json!({"status": s.status, "paid": s.paid, "refunded": s.refunded, "net": s.net}),
+                            Err(e) => return from_domain(e),
+                        }
+                        out.push(o);
+                    }
+                    ok(json!({"orders": out}))
+                }
+                Err(e) => from_sync(e),
+            }
         }
+        (Method::Post, ["v1", "orders", id, "payments"]) => match body() {
+            // Cash only: card and mobile money need provider verification (not connected yet).
+            Ok(b) => match (b["method"].as_str(), b["amount"].as_i64()) {
+                (Some("cash"), Some(amount)) => bo_domain::record_cash(n, id, amount, b["note"].as_str())
+                    .map(|s| ok(json!({"payment": {"status": s.status, "paid": s.paid, "refunded": s.refunded, "net": s.net, "total": s.total}})))
+                    .unwrap_or_else(from_domain),
+                (Some("cash"), None) => err(422, "INVALID", "amount must be a whole number of minor units"),
+                _ => err(422, "INVALID", "only cash payments can be recorded here; online payments come from the payment provider"),
+            },
+            Err(r) => r,
+        },
         (Method::Get, ["v1", "orders", "by-key", key]) => match by_key(n, key) {
             Ok(Some(o)) => summary(n, &o),
             Ok(None) => err(404, "NOT_FOUND", "no order for that key"),
