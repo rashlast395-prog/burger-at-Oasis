@@ -1,0 +1,16 @@
+[package]
+name = "bo-sync"
+description = "Burger Oasis engine: offline-first replication (event log, hybrid logical clock, version-vector sync, conflict rules)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bo-engine = { path = "../core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+getrandom = "0.2"
+
+[dev-dependencies]
+tempfile = { workspace = true }

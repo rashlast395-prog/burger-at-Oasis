@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["storage", "core"]
+members = ["storage", "core", "sync"]
 
 [workspace.package]
 version = "0.1.0"
