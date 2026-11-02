@@ -70,7 +70,12 @@ private keys, and `node.db` (and any backup of it) contains the signing key.
 * No backups, metrics or log shipping from the server yet; no rate limiting beyond a
   64-connection cap.
 * Orders and inventory follow the rules in `engine/domain` (state machine, stock ledger,
-  recipes; the server reconciles stock every 30 s). Payments are still a placeholder.
+  recipes; the server reconciles stock every 30 s).
+* Payments are an append-only ledger: tills record cash (offline too); only the server may
+  record card or mobile money. The server prints orders whose money needs attention (unpaid
+  completed orders, cancelled orders still holding money, over-refunds) every 30 s and never
+  moves money itself. **Paystack is not connected**: verifying payments with Paystack
+  needs the restaurant's account and secret key, and is the next step for online payments.
 * Business defaults approved by the owner on 2026-11-02: deduct stock at `accepted`, allow
   overselling (flagged), no editing a placed order, cancel outranks in-progress statuses,
   completed outranks cancel.

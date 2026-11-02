@@ -28,7 +28,10 @@ const USAGE: &str = "usage:
   bo-device delete <dir> <collection> <id>
   bo-device order  <dir> '<order json: items, currency, optional delivery_fee/discount/notes>'
   bo-device status <dir> <order id> <accepted|preparing|ready|out_for_delivery|completed|cancelled>
-  bo-device stock  <dir> [<sku> <delta> <restock|waste|adjustment>]";
+  bo-device stock  <dir> [<sku> <delta> <restock|waste|adjustment>]
+  bo-device pay    <dir> <order id> <amount in pesewas>      (cash)
+  bo-device refund <dir> <order id> <amount in pesewas>      (cash)
+  bo-device paid   <dir> <order id>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -75,6 +78,22 @@ fn main() -> ExitCode {
             for (sku, level) in bo_domain::stock_levels(n).map_err(|e| e.to_string())? {
                 println!("{sku:<24} {level}{}", if level < 0 { "   OVERSOLD" } else { "" });
             }
+            Ok(())
+        }),
+        Some(cmd @ ("pay" | "refund" | "paid")) => with_node(&pos, |n, _| {
+            let order = pos.get(1).ok_or(USAGE)?;
+            let s = if cmd == "paid" {
+                bo_domain::payment_summary(n, order)
+            } else {
+                let amount: i64 = pos.get(2).ok_or(USAGE)?.parse().map_err(|_| "amount must be a whole number of minor units (pesewas)")?;
+                if cmd == "pay" {
+                    bo_domain::record_cash(n, order, amount, None)
+                } else {
+                    bo_domain::record_refund(n, order, amount, None)
+                }
+            }
+            .map_err(|e| e.to_string())?;
+            println!("order {order}: {} (paid {}, refunded {}, net {} of {})", s.status, s.paid, s.refunded, s.net, s.total);
             Ok(())
         }),
         Some("delete") => with_node(&pos, |n, _| {

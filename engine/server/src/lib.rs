@@ -19,13 +19,14 @@ pub const DEFAULT_COLLECTIONS: [(&str, &str); 6] = [
     ("customers", "last-writer-wins"),
     ("inventory_ledger", "inventory-ledger"),
     ("recipes", "versioned"),
-    ("payments", "server-authoritative"),
+    ("payments", "payment-ledger"),
 ];
 
 pub fn rule_by_name(name: &str) -> Option<Box<dyn Rule>> {
     match name {
         "order" => Some(Box::new(bo_domain::OrderRule)),
         "inventory-ledger" => Some(Box::new(bo_domain::InventoryLedger)),
+        "payment-ledger" => Some(Box::new(bo_domain::PaymentLedger)),
         "last-writer-wins" => Some(Box::new(LastWriterWins)),
         "append-only" => Some(Box::new(AppendOnly)),
         "server-authoritative" => Some(Box::new(ServerAuthoritative)),

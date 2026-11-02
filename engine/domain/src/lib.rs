@@ -55,13 +55,17 @@ use serde_json::{json, Map, Value};
 pub const ORDERS: &str = "orders";
 pub const LEDGER: &str = "inventory_ledger";
 pub const RECIPES: &str = "recipes";
+pub const PAYMENTS: &str = "payments";
+
+pub mod payments;
+pub use payments::{payment_anomalies, payment_summary, record_cash, record_online, record_refund, Anomaly, PaymentLedger, PaymentSummary};
 
 /// Order statuses in rank order (index + 1 is the rank).
 pub const STATUSES: [&str; 7] = ["placed", "accepted", "preparing", "ready", "out_for_delivery", "cancelled", "completed"];
 
 const MAX_ITEMS: usize = 200;
 const MAX_QTY: i64 = 1000;
-const MAX_MONEY: i64 = 100_000_000_00; // 100 million in major units
+pub(crate) const MAX_MONEY: i64 = 100_000_000_00; // 100 million in major units
 const MAX_STOCK_DELTA: i64 = 1_000_000;
 
 pub fn rank(status: &str) -> Option<u8> {
@@ -109,7 +113,7 @@ pub type Result<T> = std::result::Result<T, DomainError>;
 
 // ---------------------------------------------------------------------- validation
 
-fn int(v: &Value, field: &str, min: i64, max: i64) -> std::result::Result<i64, String> {
+pub(crate) fn int(v: &Value, field: &str, min: i64, max: i64) -> std::result::Result<i64, String> {
     match v.get(field) {
         Some(Value::Number(n)) if n.is_i64() || n.is_u64() => {
             let x = n.as_i64().ok_or_else(|| format!("{field} is too large"))?;
@@ -124,7 +128,7 @@ fn int(v: &Value, field: &str, min: i64, max: i64) -> std::result::Result<i64, S
     }
 }
 
-fn text<'a>(v: &'a Value, field: &str, max: usize) -> std::result::Result<&'a str, String> {
+pub(crate) fn text<'a>(v: &'a Value, field: &str, max: usize) -> std::result::Result<&'a str, String> {
     match v.get(field) {
         Some(Value::String(s)) if !s.trim().is_empty() && s.len() <= max => Ok(s),
         Some(Value::String(_)) => Err(format!("{field} must be 1 to {max} characters")),
@@ -196,7 +200,7 @@ pub fn validate_entry(doc: &Value) -> std::result::Result<(), String> {
     Ok(())
 }
 
-fn upsert_doc(ev: &Event) -> Option<&Value> {
+pub(crate) fn upsert_doc(ev: &Event) -> Option<&Value> {
     match &ev.op {
         Op::Upsert { doc } => Some(doc),
         Op::Delete => None,
@@ -289,6 +293,7 @@ pub fn rules() -> Vec<(String, Box<dyn Rule>)> {
         (ORDERS.into(), Box::new(OrderRule)),
         (LEDGER.into(), Box::new(InventoryLedger)),
         (RECIPES.into(), Box::new(bo_sync::Versioned)),
+        (PAYMENTS.into(), Box::new(PaymentLedger)),
     ]
 }
 

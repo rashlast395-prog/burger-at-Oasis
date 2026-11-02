@@ -60,8 +60,8 @@ try {
     Check ((Run $device @('get', $d, 'menu', 'm1')).Out -match 'Burger') 'read it back'
     $r = Run $device @('put', $d, 'menu', (J '{"_id":"m2","name":"unversioned"}'))
     Check ($r.Code -ne 0 -and $r.Out -match 'version') 'versioned rule applies on the device (refused because of the missing version)'
-    $r = Run $device @('put', $d, 'payments', (J '{"_id":"p1"}'))
-    Check ($r.Code -ne 0 -and $r.Out -match 'only the server') 'a device may not write payments (refused by the server-only rule)'
+    $r = Run $device @('put', $d, 'payments', (J '{"_id":"paystack:r1:payment","order_id":"x","kind":"payment","method":"card","provider":"paystack","reference":"r1","amount":100,"currency":"GHS"}'))
+    Check ($r.Code -ne 0 -and $r.Out -match 'only the server') 'a device may not record a card payment (refused by the server-only rule)'
     $r = Run $device @('put', $d, 'nope', (J '{"_id":"x"}'))
     Check ($r.Code -ne 0 -and $r.Out -match 'not a synchronised collection') 'unknown collection is refused'
 
@@ -74,6 +74,11 @@ try {
     Check ((Run $device @('status', $d, $oid, 'accepted')).Out -match 'is now accepted') 'accept the order'
     Check ((Run $device @('stock', $d)).Out -match 'burger\s+-2\s+OVERSOLD') 'accepting deducted stock (reported as oversold with none on hand)'
     Check ((Run $device @('stock', $d, 'burger', '5', 'restock')).Out -match 'burger\s+3') 'restock brings it back above zero'
+
+    Write-Host "cash payment on the device"
+    Check ((Run $device @('paid', $d, $oid)).Out -match 'unpaid') 'a new order is unpaid'
+    Check ((Run $device @('refund', $d, $oid, '100')).Code -ne 0) 'cannot refund what was never paid'
+    Check ((Run $device @('pay', $d, $oid, '9000')).Out -match ': paid \(paid 9000') 'cash payment of the full total marks it paid'
 
     Write-Host "running server"
     $log = Join-Path $root 'server.out'
@@ -96,8 +101,8 @@ try {
         Write-Host '  SKIPPED  TLS on the wire is intercepted by local security software; the device refused the substituted certificate (that is the pinning working). Sync not verified on this machine.'
         $script:skipped++
     } else {
-        # menu item, order, accept + its sale entry, restock
-        Check ($r.Code -eq 0 -and $r.Out -match 'sent 5 events') 'first sync pushes all queued events'
+        # menu item, order, accept + its sale entry, restock, cash payment
+        Check ($r.Code -eq 0 -and $r.Out -match 'sent 6 events') 'first sync pushes all queued events'
         Check ((Run $device @('sync', $d)).Out -match 'sent 0 events, received 0') 'second sync has nothing to move'
     }
 }

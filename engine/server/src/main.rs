@@ -157,15 +157,34 @@ fn run(args: &[String]) -> Result<(), String> {
     // cancelled on another) every 30 seconds. Only meaningful with the standard collections.
     let reconciles = cfg.collections.get(bo_domain::ORDERS).map(String::as_str) == Some("order")
         && cfg.collections.get(bo_domain::LEDGER).map(String::as_str) == Some("inventory-ledger");
+    let audits_money = cfg.collections.get(bo_domain::PAYMENTS).map(String::as_str) == Some("payment-ledger");
     let mut ticks = 0u32;
+    let mut last_anomalies = 0usize;
     while !stop.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(200));
         ticks += 1;
-        if reconciles && ticks % 150 == 0 {
+        if ticks % 150 != 0 {
+            continue;
+        }
+        if reconciles {
             match bo_domain::reconcile(&node) {
                 Ok(0) => {}
                 Ok(n) => println!("reconcile: wrote {n} stock entries"),
                 Err(e) => eprintln!("reconcile failed: {e}"),
+            }
+        }
+        // Money is never corrected automatically; problems are reported for a person.
+        if reconciles && audits_money {
+            match bo_domain::payment_anomalies(&node) {
+                Ok(list) if list.len() != last_anomalies => {
+                    last_anomalies = list.len();
+                    println!("payments: {} order(s) need attention", list.len());
+                    for a in &list {
+                        println!("  {}: {}", a.order_id, a.problem);
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("payment audit failed: {e}"),
             }
         }
     }
