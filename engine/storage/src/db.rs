@@ -53,6 +53,8 @@ struct Writer {
 }
 
 struct Inner {
+    /// Holds the exclusive lock on `<db>.lock` for as long as the database is open.
+    _lock: File,
     /// Read-only handle used with positional reads only.
     read_file: File,
     shared: Mutex<Shared>,
@@ -79,6 +81,20 @@ pub fn wal_path_for(db_path: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
+/// Take the exclusive, OS-level lock that stops a second process (or a second `Db` in this
+/// one) from opening the same files. The lock is released when the returned file is dropped,
+/// including when the process dies, so a crash never leaves a stale lock behind.
+fn acquire_lock(db_path: &Path) -> Result<File> {
+    let mut s: OsString = db_path.as_os_str().to_owned();
+    s.push(".lock");
+    let f = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(PathBuf::from(s))?;
+    match f.try_lock() {
+        Ok(()) => Ok(f),
+        Err(std::fs::TryLockError::WouldBlock) => Err(StorageError::Locked),
+        Err(std::fs::TryLockError::Error(e)) => Err(e.into()),
+    }
+}
+
 #[derive(Clone)]
 pub struct Db {
     inner: Arc<Inner>,
@@ -88,9 +104,10 @@ impl Db {
     /// Create a new database and its log. Fails if either file already exists.
     pub fn create(path: impl AsRef<Path>) -> Result<Db> {
         let path = path.as_ref();
+        let lock = acquire_lock(path)?;
         let pager = Pager::create(path)?;
         let wal = Wal::create(wal_path_for(path))?;
-        Db::assemble(path, pager, wal)
+        Db::assemble(path, pager, wal, lock)
     }
 
     /// Open an existing database, recovering from the log first.
@@ -99,6 +116,7 @@ impl Db {
     /// silently recreated.
     pub fn open(path: impl AsRef<Path>) -> Result<Db> {
         let path = path.as_ref();
+        let lock = acquire_lock(path)?;
         let (mut wal, committed) = Wal::open(wal_path_for(path))?;
         if !committed.is_empty() {
             // Replay on a raw handle: the main file's header may itself be what needs repair.
@@ -112,14 +130,15 @@ impl Db {
             wal.reset()?;
         }
         let pager = Pager::open(path)?;
-        Db::assemble(path, pager, wal)
+        Db::assemble(path, pager, wal, lock)
     }
 
-    fn assemble(path: &Path, pager: Pager, wal: Wal) -> Result<Db> {
+    fn assemble(path: &Path, pager: Pager, wal: Wal, lock: File) -> Result<Db> {
         let state = State { overlay: BTreeMap::new(), page_count: pager.page_count(), free_head: pager.free_head() };
         let read_file = OpenOptions::new().read(true).open(path)?;
         Ok(Db {
             inner: Arc::new(Inner {
+                _lock: lock,
                 read_file,
                 shared: Mutex::new(Shared { current: Arc::new(state), readers: 0 }),
                 writer: Mutex::new(Writer { pager, wal, next_txn: 1, checkpoint_pages: DEFAULT_CHECKPOINT_PAGES }),

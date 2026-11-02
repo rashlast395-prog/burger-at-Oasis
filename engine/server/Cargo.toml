@@ -1,0 +1,24 @@
+[package]
+name = "bo-server"
+description = "Burger Oasis engine: the remote sync server (bo-server) and a device-side command line tool (bo-device)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "bo-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "bo-device"
+path = "src/bin/bo-device.rs"
+
+[dependencies]
+bo-sync = { path = "../sync" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ctrlc = { version = "3", features = ["termination"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

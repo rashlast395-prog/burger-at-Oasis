@@ -31,6 +31,7 @@ mod hlc;
 pub mod identity;
 pub mod net;
 mod rules;
+pub mod tls;
 
 pub use event::{pos, Event, Op, Role};
 use identity::Identity;
@@ -273,6 +274,11 @@ impl SyncNode {
 
     pub fn trusted(&self, device: &str) -> Option<Trusted> {
         lock(&self.trust).get(device).cloned()
+    }
+
+    /// Every enrolled device (including this node itself).
+    pub fn trusted_devices(&self) -> BTreeMap<String, Trusted> {
+        lock(&self.trust).clone()
     }
 
     /// Require a valid signature from an enrolled device on every remote event. Off by
@@ -628,3 +634,4 @@ fn save_clock(tx: &mut Tx<'_>, clk: &Hlc) -> Result<()> {
     tx.upsert("_meta", json!({"_id": "clock", "wall": clk.wall, "counter": clk.counter}))?;
     Ok(())
 }
+

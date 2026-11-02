@@ -68,6 +68,8 @@ pub enum StorageError {
     TooLarge { what: &'static str, len: usize, max: usize },
     /// The transaction was committed durably, but the follow-up checkpoint failed.
     PostCommit(Box<StorageError>),
+    /// Another handle or process already has this database open.
+    Locked,
 }
 
 impl fmt::Display for StorageError {
@@ -83,6 +85,7 @@ impl fmt::Display for StorageError {
             StorageError::ReadersActive => write!(f, "a snapshot is still open; drop all snapshots first"),
             StorageError::TooLarge { what, len, max } => write!(f, "{what} of {len} bytes is not allowed (limit {max}, minimum 1)"),
             StorageError::PostCommit(e) => write!(f, "transaction is durable but checkpoint failed: {e}"),
+            StorageError::Locked => write!(f, "the database is already open (in this or another process)"),
         }
     }
 }
